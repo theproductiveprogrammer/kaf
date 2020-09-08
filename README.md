@@ -8,7 +8,7 @@ When Kakfa is overkill for a simple Event Store.
 
 ## How?
 
-Single, simple [golang](https://golang.org) file. Run using:
+Single [golang](https://golang.org) file. Run using:
 
 ```sh
 $> go run kaf.go <port> <data folder>
@@ -16,7 +16,7 @@ $> go run kaf.go <port> <data folder>
 
 Save data using:
 
-```http
+```h
 /put/logfile
 
 POSTED Message Data
@@ -24,7 +24,7 @@ POSTED Message Data
 
 Get messages using:
 
-```http
+```
 /get/logfile?from=<msg number>
 ```
 
@@ -55,13 +55,13 @@ Message Data
 
 Keeps track of information flow:
 
-```http
+```
 /stats
 ```
 
 Responds with
 
-```json
+```
 [
   {
     startTime: <ISO-Format>,
