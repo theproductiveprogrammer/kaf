@@ -62,7 +62,7 @@ func setupRequestHandlers(cfg *config, logsChan chan logReq) {
 			h(cfg, r, logsChan, w)
 		}
 	}
-	http.HandleFunc("/put", wrapH(put))
+	http.HandleFunc("/put/", wrapH(put))
 }
 
 func put(cfg *config, r *http.Request, logsChan chan logReq, w http.ResponseWriter) {
