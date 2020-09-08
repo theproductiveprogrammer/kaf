@@ -12,22 +12,27 @@ Single [golang](https://golang.org) file. Run using:
 
 ```sh
 $> go run kaf.go <addr> <path to data folder>
-example: go run kaf.go 127.0.0.1:7749 ../kaf-data
 ```
+
+*Example:* `go run kaf.go 127.0.0.1:7749 ../kaf-data`
 
 Save data using:
 
-```h
+```
 /put/logfile
 
 POSTED Message Data
 ```
+
+*Example:* `curl localhost:7749 /put/testlog -d @notes`
 
 Get messages using:
 
 ```
 /get/logfile?from=<msg number>
 ```
+
+Example: `curl localhost:7749 /get/testlog?from=1`
 
 Responds with:
 
@@ -77,5 +82,5 @@ Each message is a JSON record with the following format:
 }
 ```
 
-Access these as normal with `/get/_kaf?from=…` 
+These can be accessed as usual with: `/get/_kaf?from=…` 
 
