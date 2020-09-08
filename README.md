@@ -55,36 +55,26 @@ Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) / [edit
 
 ## Transparency
 
-Keeps track of information flow:
+**Kaf** tracks useful information about itself in the `_kaf` log file.
+
+Each message is a JSON record with the following format:
 
 ```
-/stats
-```
-
-Responds with
-
-```
-[
-  {
-    startTime: <ISO-Format>,
-    endTime: <ISO-Format>,
-    gets: [
-    	{ logfile: ..., num: ... },
-    	{ logfile: ..., num: ... },
-			...
-    ],
-    puts: [
-    	{ logfile: ..., num: ... },
-    	{ logfile: ..., num: ... },
-			...
-    ],
-		stats: { num: ... }
-  },
-
-	{
-    startTime: <ISO-Format>,
+{
+  startTime: <ISO-Format>,
+  endTime: <ISO-Format>,
+  gets: [
+    { logfile: ..., num: ... },
+    { logfile: ..., num: ... },
     ...
-  }
-]
+  ],
+  puts: [
+    { logfile: ..., num: ... },
+    { logfile: ..., num: ... },
+    ...
+  ],
+}
 ```
+
+Access these as normal with `/get/_kaf?from=…` 
 
