@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net/http"
 	"os"
 )
 
@@ -39,7 +41,7 @@ func getConfig() *config {
 
 func showHelp() {
 	fmt.Println("kaf: Simple Event Store")
-  fmt.Println("eg: go run kaf 127.0.0.1:7749 ../kafdata")
+	fmt.Println("eg: go run kaf 127.0.0.1:7749 ../kafdata")
 	fmt.Println("    go run kaf <addr> <path to data folder>")
 }
 
@@ -48,6 +50,8 @@ func loadExistingLogs(dbloc string) chan logReq {
 }
 
 func startServer(cfg *config, logsChan chan logReq) {
+	log.Println("Starting server on", cfg.addr, "writing to", cfg.dbloc)
+	log.Fatal(http.ListenAndServe(cfg.addr, nil))
 }
 
 type config struct {
