@@ -50,8 +50,22 @@ func loadExistingLogs(dbloc string) chan logReq {
 }
 
 func startServer(cfg *config, logsChan chan logReq) {
+	setupRequestHandlers(cfg, logsChan)
+
 	log.Println("Starting server on", cfg.addr, "writing to", cfg.dbloc)
 	log.Fatal(http.ListenAndServe(cfg.addr, nil))
+}
+
+func setupRequestHandlers(cfg *config, logsChan chan logReq) {
+	wrapH := func(h reqHandler) httpHandler {
+		return func(w http.ResponseWriter, r *http.Request) {
+			h(cfg, r, logsChan, w)
+		}
+	}
+	http.HandleFunc("/put", wrapH(put))
+}
+
+func put(cfg *config, r *http.Request, logsChan chan logReq, w http.ResponseWriter) {
 }
 
 type config struct {
@@ -62,3 +76,6 @@ type config struct {
 type logReq struct {
 	name string
 }
+
+type reqHandler func(*config, *http.Request, chan logReq, http.ResponseWriter)
+type httpHandler func(http.ResponseWriter, *http.Request)
