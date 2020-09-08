@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 )
 
 /*    understand/
@@ -23,8 +24,17 @@ func main() {
 	startServer(cfg, logsChan)
 }
 
+/*    way/
+ * Load configuration from the command line
+ */
 func getConfig() *config {
-	return nil
+	if len(os.Args) != 3 {
+		return nil
+	}
+	return &config{
+		addr:  os.Args[1],
+		dbloc: os.Args[2],
+	}
 }
 
 func showHelp() {
