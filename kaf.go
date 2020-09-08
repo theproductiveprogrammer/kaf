@@ -39,7 +39,8 @@ func getConfig() *config {
 
 func showHelp() {
 	fmt.Println("kaf: Simple Event Store")
-	fmt.Println("go run kaf <addr> <path to data folder>")
+  fmt.Println("eg: go run kaf 127.0.0.1:7749 ../kafdata")
+	fmt.Println("    go run kaf <addr> <path to data folder>")
 }
 
 func loadExistingLogs(dbloc string) chan logReq {
