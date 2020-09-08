@@ -11,7 +11,8 @@ When Kakfa is overkill for a simple Event Store.
 Single [golang](https://golang.org) file. Run using:
 
 ```sh
-$> go run kaf.go <port> <data folder>
+$> go run kaf.go <addr> <path to data folder>
+example: go run kaf.go 127.0.0.1:7749 ../kaf-data
 ```
 
 Save data using:
