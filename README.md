@@ -51,6 +51,8 @@ Message Data
 ...
 ```
 
+Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) / [edit](https://www.vim.org) and examine.
+
 ## Transparency
 
 Keeps track of information flow:
