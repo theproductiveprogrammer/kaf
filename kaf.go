@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 /*    understand/
@@ -66,6 +67,16 @@ func setupRequestHandlers(cfg *config, logsChan chan logReq) {
 }
 
 func put(cfg *config, r *http.Request, logsChan chan logReq, w http.ResponseWriter) {
+	name := strings.TrimSpace(r.URL.Path[len("/put/"):])
+	if len(name) == 0 {
+		err_("Missing event log name", 400, r, w)
+		return
+	}
+}
+
+func err_(error string, code int, r *http.Request, w http.ResponseWriter) {
+	log.Println("ERROR:", r.RemoteAddr, r.RequestURI, error)
+	http.Error(w, error, code)
 }
 
 type config struct {
