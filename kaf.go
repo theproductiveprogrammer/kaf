@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -23,8 +26,7 @@ func main() {
 		return
 	}
 
-	logsRoutine := getLogsRoutine(cfg.dbloc)
-	startServer(cfg, logsRoutine)
+	startServer(cfg, getLogsRoutine(cfg.dbloc))
 }
 
 /*
@@ -123,32 +125,118 @@ func showHelp() {
 	fmt.Println("    go run kaf <addr> <path to data folder>")
 }
 
-func loadExistingLogs(dbloc string) chan logReq {
+/*    understand/
+ * We use a goroutine as the single point of synchoronous
+ * contact for all other goroutines to get access to
+ * message logs - it creates/manages all of them
+ */
+func getLogsRoutine(dbloc string) logsRoutine {
+	c := make(chan logReq)
+	logs := []*msgLog{}
+
+	go func() {
+		for {
+			req := <-c
+			msgLog := findLog(logs, req.name)
+			if req.noCreate || msgLog != nil {
+				req.resp <- logReqResp{msgLog, nil}
+				continue
+			}
+
+			log, err := createLog(dbloc, req.name, logs)
+			if err != nil {
+				req.resp <- logReqResp{nil, err}
+			} else {
+				logs = append(logs, log)
+				req.resp <- logReqResp{log, nil}
+			}
+
+		}
+	}()
+
+	return logsRoutine{c}
+}
+
+func findLog(logs []*msgLog, name string) *msgLog {
+	for _, l := range logs {
+		if l.name == name {
+			return l
+		}
+	}
 	return nil
 }
 
-func startServer(cfg *config, logsChan chan logReq) {
-	setupRequestHandlers(cfg, logsChan)
+func createLog(dbloc, name string, logs []*msgLog) (*msgLog, error) {
+	loc := path.Join(dbloc, name)
+	_, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	g := make(chan getReq)
+	p := make(chan putReq)
+	go func() {
+		for {
+			select {
+			case req := <-g:
+				req.resp <- getReqResp{err: errors.New("TODO")}
+			case req := <-p:
+				req.resp <- putReqResp{err: errors.New("TODO")}
+			}
+		}
+	}()
+	return &msgLog{
+		name: name,
+		get:  g,
+		put:  p,
+	}, nil
+}
+
+func startServer(cfg *config, logsR logsRoutine) {
+	setupRequestHandlers(cfg, logsR)
 
 	log.Println("Starting server on", cfg.addr, "writing to", cfg.dbloc)
 	log.Fatal(http.ListenAndServe(cfg.addr, nil))
 }
 
-func setupRequestHandlers(cfg *config, logsChan chan logReq) {
+func setupRequestHandlers(cfg *config, lr logsRoutine) {
 	wrapH := func(h reqHandler) httpHandler {
 		return func(w http.ResponseWriter, r *http.Request) {
-			h(cfg, r, logsChan, w)
+			h(cfg, r, lr, w)
 		}
 	}
 	http.HandleFunc("/put/", wrapH(put))
 }
 
-func put(cfg *config, r *http.Request, logsChan chan logReq, w http.ResponseWriter) {
+func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
+	c := make(chan logReqResp)
+	logsR.c <- logReq{
+		name:     name,
+		noCreate: !create,
+		resp:     c,
+	}
+	resp := <-c
+	return resp.msglog, resp.err
+}
+
+func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/put/"):])
 	if len(name) == 0 {
 		err_("Missing event log name", 400, r, w)
 		return
 	}
+	msglog, err := getLog(name, logsR, true)
+	if err != nil {
+		err_(err.Error(), 500, r, w)
+		return
+	}
+
+	c := make(chan putReqResp)
+	msglog.put <- putReq{
+		data: r.Body,
+		resp: c,
+	}
+	resp := <-c
+	w.Write([]byte(resp.err.Error()))
 }
 
 func err_(error string, code int, r *http.Request, w http.ResponseWriter) {
