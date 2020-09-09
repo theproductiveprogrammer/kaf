@@ -13,7 +13,7 @@ import (
  * (It all starts here)
  *
  *    way/
- * Get the user configuration, load existing log files, and start the
+ * Get the user configuration, start the logs goroutine, and start the
  * server
  */
 func main() {
@@ -23,8 +23,9 @@ func main() {
 		return
 	}
 
-	logsChan := loadExistingLogs(cfg.dbloc)
-	startServer(cfg, logsChan)
+	logsRoutine := getLogsRoutine(cfg.dbloc)
+	startServer(cfg, logsRoutine)
+}
 
 /*
  * important types. Helper types at end of file
@@ -160,9 +161,5 @@ type config struct {
 	dbloc string
 }
 
-type logReq struct {
-	name string
-}
-
-type reqHandler func(*config, *http.Request, chan logReq, http.ResponseWriter)
+type reqHandler func(*config, *http.Request, logsRoutine, http.ResponseWriter)
 type httpHandler func(http.ResponseWriter, *http.Request)
