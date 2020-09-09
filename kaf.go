@@ -25,6 +25,82 @@ func main() {
 
 	logsChan := loadExistingLogs(cfg.dbloc)
 	startServer(cfg, logsChan)
+
+/*
+ * important types. Helper types at end of file
+ */
+
+/*    understand/
+ * event logs are managed by a goroutine represented by this struct.
+ * Because it is a goroutine, we communicate with it via a channel -
+ * making requests for message logs
+ */
+type logsRoutine struct {
+	c chan logReq
+}
+
+/*    understand/
+ * represents a request for a message log from the main logsRoutine
+ * goroutine. We can request for the log to be created if it doesn't
+ * exist and we expect our response to be sent back via the channel we
+ * provide (either the message log itself or an error)
+ */
+type logReq struct {
+	name     string
+	noCreate bool
+
+	resp chan logReqResp
+}
+type logReqResp struct {
+	msglog *msgLog
+	err    error
+}
+
+/*    understand/
+ * similar to logsRoutine, each message log is also handled by it's own
+ * goroutine. We communicate to it via it's channels - either to get
+ * message logs or to put a new message log.
+ */
+type msgLog struct {
+	name string
+	get  chan getReq
+	put  chan putReq
+}
+
+/*    understand/
+ * represents a request to a message log to get messages and hands over
+ * a channel where we expect the responses
+ */
+type getReq struct {
+	num  int
+	resp chan getReqResp
+}
+type getReqResp struct {
+	msg []msg
+	err error
+}
+
+/*    understand/
+ * represents a request to a message log to put messages and hands over
+ * a channel where we expect the response or error
+ */
+type putReq struct {
+	data io.Reader
+	resp chan putReqResp
+}
+type putReqResp struct {
+	num uint32
+	err error
+}
+
+/*    understand/
+ * represents a message in the event log
+ */
+type msg struct {
+	num  uint32
+	sz   uint32
+	data []byte
+	err  error
 }
 
 /*    way/
