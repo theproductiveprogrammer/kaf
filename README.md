@@ -37,7 +37,7 @@ Example: `curl localhost:7749 /get/testlog?from=1`
 Responds with:
 
 ```
-KAF_MSGS | Num Messages
+KAF_MSGS | v1 | Num Messages
 KAF_MSG | Msg Num | Size (\n)
 Message Data
 ...
