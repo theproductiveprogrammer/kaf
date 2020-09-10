@@ -215,6 +215,8 @@ func getLogsRoutine(dbloc string) logsRoutine {
 		}
 	}()
 
+	logsR := logsRoutine{c}
+
 	hasStats := func(log_ *msgLog) bool {
 		return log_.stats.getCount > 0 || log_.stats.putCount > 0
 	}
@@ -246,6 +248,12 @@ func getLogsRoutine(dbloc string) logsRoutine {
 				continue
 			}
 
+			msglog, err := getLog("_kaf", logsR, true)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
 			b.WriteString("{\"startTime\":\"")
 			b.WriteString(start.UTC().Format(time.RFC3339))
 			b.WriteString("\",\"endTime\":\"")
@@ -262,14 +270,22 @@ func getLogsRoutine(dbloc string) logsRoutine {
 						log_.name, log_.stats.getCount, log_.stats.putCount)
 				}
 			}
-      b.WriteRune('}')
+			b.WriteRune('}')
 
-			fmt.Println(b.String())
+			c := make(chan putReqResp)
+			msglog.put <- putReq{
+				data: []byte(b.String()),
+				resp: c,
+			}
+			resp := <-c
+			if resp.err != nil {
+				log.Println(err)
+			}
 			b.Reset()
 		}
 	}()
 
-	return logsRoutine{c}
+	return logsR
 }
 
 func findLog(logs []*msgLog, name string) *msgLog {
