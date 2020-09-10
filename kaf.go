@@ -178,7 +178,7 @@ func getLogsRoutine(dbloc string) logsRoutine {
 
 			if req.create {
 
-				createLog(dbloc, req.name)
+				createLogFile(dbloc, req.name)
 
 				log_, err := loadLog(dbloc, req.name)
 				if err != nil {
@@ -211,7 +211,7 @@ func findLog(logs []*msgLog, name string) *msgLog {
 /*    way/
  * create the requested db file with header.
  */
-func createLog(dbloc, name string) error {
+func createLogFile(dbloc, name string) error {
 	loc := path.Join(dbloc, name)
 	f, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
