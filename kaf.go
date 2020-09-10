@@ -15,6 +15,11 @@ import (
 )
 
 /*    understand/
+ * program version
+ */
+const VERSION = "0.0.1"
+
+/*    understand/
  * main entry point into our program
  * (It all starts here)
  *
@@ -133,6 +138,7 @@ func showHelp() {
 	fmt.Println("kaf: Simple Event Store")
 	fmt.Println("eg: go run kaf 127.0.0.1:7749 ../kafdata")
 	fmt.Println("    go run kaf <addr> <path to data folder>")
+	fmt.Println("version: " + VERSION)
 }
 
 /*    understand/
