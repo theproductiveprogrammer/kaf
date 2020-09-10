@@ -136,9 +136,10 @@ type msg struct {
 /*
  * Data File constants
  */
-const DBHeader = "KAF|v1"
-const RecHeaderPfx = "\nKAF|"
+const DBHeader = "KAF_DB|v1"
+const RecHeaderPfx = "\nKAF_MSG|"
 const RecHeaderSfx = "\n"
+const RespHeaderPfx = "KAF_MSGS|v1"
 
 /*    way/
  * Load configuration from the command line
@@ -692,7 +693,7 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		msgs = resp.msgs
 	}
 
-	hdr := fmt.Sprintf("KAF|%d", len(msgs))
+	hdr := fmt.Sprintf("%s|%d", RespHeaderPfx, len(msgs))
 	if _, err := w.Write([]byte(hdr)); err != nil {
 		err_("get: failed sending data back", 500, r, w)
 		return
