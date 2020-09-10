@@ -1,6 +1,6 @@
 # Kaf
 
-A Simple Event Store (cf. [Apache Kafka](https://kafka.apache.org))
+A Simple, High Performance, Event Store (cf. [Apache Kafka](https://kafka.apache.org))
 
 ## Why?
 
@@ -37,11 +37,11 @@ Example: `curl localhost:7749 /get/testlog?from=1`
 Responds with:
 
 ```
-KAF | Num Messages
-KAF | Msg Num | Size (\n)
+KAF_MSGS | Num Messages
+KAF_MSG | Msg Num | Size (\n)
 Message Data
 ...
-KAF | Msg Num | Size (\n)
+KAF_MSG | Msg Num | Size (\n)
 Message Data
 ```
 
@@ -52,8 +52,8 @@ High performance Golang server - one [goroutine](https://tour.golang.org/concurr
 Disk format:
 
 ```
-KAF | v1 (\n)
-KAF | Msg Num | Size (\n)
+KAF_DB | v1 | Start Msg Num (\n)
+KAF_MSG | Msg Num | Size (\n)
 Message Data
 ...
 ```
