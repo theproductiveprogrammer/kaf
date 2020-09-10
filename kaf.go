@@ -136,7 +136,7 @@ type msg struct {
 /*
  * Data File constants
  */
-const DBHeader = "KAF_DB|v1"
+const DBHeader = "KAF_DB|v1|1"
 const RecHeaderPfx = "\nKAF_MSG|"
 const RecHeaderSfx = "\n"
 const RespHeaderPfx = "KAF_MSGS|v1"
