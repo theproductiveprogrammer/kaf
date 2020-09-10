@@ -12,6 +12,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 /*    understand/
@@ -76,7 +77,8 @@ type msgLog struct {
 	name  string
 	get   chan getReq
 	put   chan putReq
-	stats chan statReq
+	stat  chan statReq
+	stats stats
 }
 
 /*    understand/
@@ -109,9 +111,13 @@ type putReqResp struct {
  * represents a request to a message log get stats
  */
 type statReq struct {
-	resp chan statReqResp
+	resp chan stats
 }
-type statReqResp struct {
+
+/*    understand/
+ * relevant stats for a message log
+ */
+type stats struct {
 	getCount uint32
 	putCount uint32
 }
@@ -159,7 +165,8 @@ func showHelp() {
  * message logs - it creates/manages all of them
  *
  *    way/
- * load all logs from disk, then return the goroutine
+ * load all logs from disk, set up the stat tracker,
+ * then return the goroutine
  */
 func getLogsRoutine(dbloc string) logsRoutine {
 	c := make(chan logReq)
@@ -205,6 +212,58 @@ func getLogsRoutine(dbloc string) logsRoutine {
 
 			req.resp <- logReqResp{}
 
+		}
+	}()
+
+	hasStats := func(log_ *msgLog) bool {
+		return log_.stats.getCount > 0 || log_.stats.putCount > 0
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	var statCount uint32 = 0
+	go func() {
+		c := make(chan stats)
+		var b strings.Builder
+
+		for {
+			isEmpty := true
+			start := time.Now()
+
+			<-ticker.C
+			statCount++
+
+			for _, log_ := range logs {
+				log_.stat <- statReq{resp: c}
+				log_.stats = <-c
+				if hasStats(log_) {
+					isEmpty = false
+				}
+			}
+
+			end := time.Now()
+
+			if isEmpty {
+				continue
+			}
+
+			b.WriteString("{\"startTime\":\"")
+			b.WriteString(start.UTC().Format(time.RFC3339))
+			b.WriteString("\",\"endTime\":\"")
+			b.WriteString(end.UTC().Format(time.RFC3339))
+			fmt.Fprintf(&b, "\",\"stat\":%d,", statCount)
+			firstDone := false
+			for _, log_ := range logs {
+				if hasStats(log_) {
+					if firstDone {
+						b.WriteRune(',')
+					}
+					firstDone = true
+					fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d}",
+						log_.name, log_.stats.getCount, log_.stats.putCount)
+				}
+			}
+			fmt.Println(b.String())
+			b.Reset()
 		}
 	}()
 
@@ -265,9 +324,11 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		for {
 			select {
 			case req := <-g:
+				getCount++
 				msgs_, err := get_(req.num, msgs, f)
 				req.resp <- getReqResp{msgs_, err}
 			case req := <-p:
+				putCount++
 				msg, err := put_(req.data, nextnum, f)
 				if err != nil {
 					req.resp <- putReqResp{err: err}
@@ -277,7 +338,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					req.resp <- putReqResp{num: msg.num}
 				}
 			case req := <-s:
-				req.resp <- statReqResp{getCount, putCount}
+				req.resp <- stats{getCount, putCount}
 				getCount = 0
 				putCount = 0
 			}
