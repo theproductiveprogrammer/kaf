@@ -195,7 +195,7 @@ func getLogsRoutine(dbloc string) logsRoutine {
 				continue
 			}
 
-			if req.create {
+			if req.create || logExists(dbloc, req.name) {
 
 				createLogFile(dbloc, req.name)
 
@@ -286,6 +286,15 @@ func getLogsRoutine(dbloc string) logsRoutine {
 	}()
 
 	return logsR
+}
+
+func logExists(dbloc, name string) bool {
+	loc := path.Join(dbloc, name)
+	info, err := os.Stat(loc)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }
 
 func findLog(logs []*msgLog, name string) *msgLog {
