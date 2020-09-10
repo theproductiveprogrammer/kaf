@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -138,10 +139,27 @@ func showHelp() {
  * We use a goroutine as the single point of synchoronous
  * contact for all other goroutines to get access to
  * message logs - it creates/manages all of them
+ *
+ *    way/
+ * load all logs from disk, then return the goroutine
  */
 func getLogsRoutine(dbloc string) logsRoutine {
 	c := make(chan logReq)
 	logs := []*msgLog{}
+
+	files, err := ioutil.ReadDir(dbloc)
+	if err != nil {
+		log.Println(err)
+		log.Panic("Failed to read:", dbloc)
+	}
+	for _, f := range files {
+		log_, err := loadLog(dbloc, f.Name())
+		if err != nil {
+			log.Println(err)
+			log.Panic("Failed to read:", f.Name())
+		}
+		logs = append(logs, log_)
+	}
 
 	go func() {
 		for {
@@ -156,13 +174,13 @@ func getLogsRoutine(dbloc string) logsRoutine {
 
 				createLog(dbloc, req.name)
 
-				log, err := loadLog(dbloc, req.name)
+				log_, err := loadLog(dbloc, req.name)
 				if err != nil {
 					req.resp <- logReqResp{nil, err}
 					continue
 				}
-				logs = append(logs, log)
-				req.resp <- logReqResp{log, nil}
+				logs = append(logs, log_)
+				req.resp <- logReqResp{log_, nil}
 
 				continue
 			}
