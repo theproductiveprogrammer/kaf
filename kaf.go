@@ -419,6 +419,10 @@ func readMsg(msg__ msg, f *os.File) (*msg, error) {
 		return nil, err
 	}
 
+  if msg_ == nil {
+    return nil, errors.New("Message missing")
+  }
+
 	if msg__.num != msg_.num {
 		return nil, errors.New("Message number on disk incorrect")
 	}
