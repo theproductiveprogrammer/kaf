@@ -288,6 +288,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		name: name,
 		get:  g,
 		put:  p,
+		stat: s,
 	}, nil
 }
 
