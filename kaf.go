@@ -17,7 +17,7 @@ import (
 /*    understand/
  * program version
  */
-const VERSION = "0.0.1"
+const VERSION = "0.1.0"
 
 /*    understand/
  * main entry point into our program
