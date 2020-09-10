@@ -219,7 +219,7 @@ func getLogsRoutine(dbloc string) logsRoutine {
 		return log_.stats.getCount > 0 || log_.stats.putCount > 0
 	}
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	var statCount uint32 = 0
 	go func() {
 		c := make(chan stats)
