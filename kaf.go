@@ -266,19 +266,36 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 }
 
 /*    way/
- * return the requested message from disk
+ * return a few messages (max 5 || size < 256) to the user
  */
 func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
-	var msg_ msg
-	for _, m := range msgs {
-		if m.num == num {
-			msg_ = *m
-			break
-		}
-	}
-	if msg_.num == 0 {
-		return nil, nil
-	}
+	var msgs_ []*msg
+  var tot uint32 = 0
+  for i :=0;i < 5;i++ {
+    ndx := num+uint32(i-1)
+    if ndx < uint32(len(msgs)) {
+      m := msgs[ndx]
+      if m != nil {
+        msg_,err := readMsg(*m, f)
+        if err != nil {
+          return nil, err
+        }
+        msgs_ = append(msgs_, msg_)
+        tot += m.sz
+      }
+      if tot >= 256 {
+        break
+      }
+    }
+  }
+
+  return msgs_, nil
+}
+
+/*    way/
+ * read message data from disk
+ */
+func readMsg(msg_ msg, f *os.File) (*msg, error) {
 
 	data := make([]byte, msg_.sz)
 	_, err := f.ReadAt(data, msg_.offset)
@@ -287,7 +304,7 @@ func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
 	}
 	msg_.data = data
 
-	return []*msg{&msg_}, nil
+	return &msg_, nil
 }
 
 /*    way/
