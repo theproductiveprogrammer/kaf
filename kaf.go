@@ -120,6 +120,7 @@ type statReq struct {
 type stats struct {
 	getCount uint32
 	putCount uint32
+	errCount uint32
 }
 
 /*    understand/
@@ -268,8 +269,13 @@ func getLogsRoutine(dbloc string) logsRoutine {
 						b.WriteRune(',')
 					}
 					firstDone = true
-					fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d}",
-						log_.name, log_.stats.getCount, log_.stats.putCount)
+					if log_.stats.errCount > 0 {
+						fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d,\"err\":%d}",
+							log_.name, log_.stats.getCount, log_.stats.putCount, log_.stats.errCount)
+					} else {
+						fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d}",
+							log_.name, log_.stats.getCount, log_.stats.putCount)
+					}
 				}
 			}
 			b.WriteRune('}')
@@ -345,6 +351,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 
 	var getCount uint32 = 0
 	var putCount uint32 = 0
+	var errCount uint32 = 0
 
 	g := make(chan getReq)
 	p := make(chan putReq)
@@ -355,11 +362,15 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 			case req := <-g:
 				getCount++
 				msgs_, err := get_(req.num, msgs, f)
+				if err != nil {
+					errCount++
+				}
 				req.resp <- getReqResp{msgs_, err}
 			case req := <-p:
 				putCount++
 				msg, err := put_(req.data, nextnum, f)
 				if err != nil {
+					errCount++
 					req.resp <- putReqResp{err: err}
 				} else {
 					msgs = append(msgs, msg)
@@ -367,9 +378,10 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					req.resp <- putReqResp{num: msg.num}
 				}
 			case req := <-s:
-				req.resp <- stats{getCount, putCount}
+				req.resp <- stats{getCount, putCount, errCount}
 				getCount = 0
 				putCount = 0
+				errCount = 0
 			}
 		}
 	}()
@@ -420,9 +432,9 @@ func readMsg(msg__ msg, f *os.File) (*msg, error) {
 		return nil, err
 	}
 
-  if msg_ == nil {
-    return nil, errors.New("Message missing")
-  }
+	if msg_ == nil {
+		return nil, errors.New("Message missing")
+	}
 
 	if msg__.num != msg_.num {
 		return nil, errors.New("Message number on disk incorrect")
