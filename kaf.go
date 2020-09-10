@@ -90,8 +90,7 @@ type getReqResp struct {
  * a channel where we expect the response or error
  */
 type putReq struct {
-	sz   uint32
-	data io.Reader
+	data []byte
 	resp chan putReqResp
 }
 type putReqResp struct {
@@ -228,7 +227,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 			case req := <-g:
 				req.resp <- getReqResp{err: errors.New("TODO")}
 			case req := <-p:
-				msg, err := put_(req.sz, req.data, nextnum, f)
+				msg, err := put_(req.data, nextnum, f)
 				if err != nil {
 					req.resp <- putReqResp{err: err}
 				} else {
@@ -248,52 +247,30 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 }
 
 /*    way/
- * append the message to the end of the file with the correct record
- * header (KAF|num|sz)
+ * read in the message then append it to the end of the file with the
+ * correct record header (KAF|num|sz)
  */
-func put_(len_ uint32, data io.Reader, num uint32, f *os.File) (*msg, error) {
+func put_(data []byte, num uint32, f *os.File) (*msg, error) {
 	inf, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 	off := inf.Size()
 
-	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, len_, RecHeaderSfx)
+	sz := uint32(len(data))
+	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, sz, RecHeaderSfx)
 	hdr_ := []byte(hdr)
 	if _, err := f.WriteAt(hdr_, off); err != nil {
 		return nil, err
 	}
 	off += int64(len(hdr_))
 
-	sz := uint32(0)
-	buf := make([]byte, 1024)
-	n, err := data.Read(buf)
-	for n > 0 || err == nil {
-		sz += uint32(n)
-		if sz > len_ {
-			break
-		}
-		if n > 0 {
-			if _, err := f.WriteAt(buf[:n], off); err != nil {
-				return nil, err
-			}
-		}
-		if err != nil {
-			break
-		}
-		off += int64(n)
-		n, err = data.Read(buf)
-	}
-	if err != io.EOF {
+	if _, err := f.WriteAt(data, off); err != nil {
 		return nil, err
 	}
 
-	if sz != len_ {
-		return nil, errors.New("writing data size incorrect")
-	}
-
 	return &msg{
-		offset: off - int64(len_),
+		offset: off,
 		num:    num,
 		sz:     sz,
 		data:   nil,
@@ -489,11 +466,24 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		err_("put: Empty message length", 400, r, w)
 		return
 	}
+	if sz > 5*1024*1024 {
+		err_("put: too large message length", 400, r, w)
+		return
+	}
+
+	data := make([]byte, sz)
+	if data == nil {
+		err_("put: Out of Memory", 500, r, w)
+		return
+	}
+	if _, err := io.ReadFull(r.Body, data); err != nil {
+		err_("put: failed reading message data", 400, r, w)
+		return
+	}
 
 	c := make(chan putReqResp)
 	msglog.put <- putReq{
-		sz:   uint32(sz),
-		data: r.Body,
+		data: data,
 		resp: c,
 	}
 	resp := <-c
