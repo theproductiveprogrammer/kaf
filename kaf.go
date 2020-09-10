@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -49,8 +51,8 @@ type logsRoutine struct {
  * provide (either the message log itself or an error)
  */
 type logReq struct {
-	name     string
-	noCreate bool
+	name   string
+	create bool
 
 	resp chan logReqResp
 }
@@ -88,6 +90,7 @@ type getReqResp struct {
  * a channel where we expect the response or error
  */
 type putReq struct {
+	sz   uint32
 	data io.Reader
 	resp chan putReqResp
 }
@@ -100,11 +103,18 @@ type putReqResp struct {
  * represents a message in the event log
  */
 type msg struct {
-	num  uint32
-	sz   uint32
-	data []byte
-	err  error
+	offset int64
+	num    uint32
+	sz     uint32
+	data   []byte
 }
+
+/*
+ * Data File constants
+ */
+const DBHeader = "KAF|v1"
+const RecHeaderPfx = "\nKAF|"
+const RecHeaderSfx = "\n"
 
 /*    way/
  * Load configuration from the command line
@@ -138,18 +148,27 @@ func getLogsRoutine(dbloc string) logsRoutine {
 		for {
 			req := <-c
 			msgLog := findLog(logs, req.name)
-			if req.noCreate || msgLog != nil {
+			if msgLog != nil {
 				req.resp <- logReqResp{msgLog, nil}
 				continue
 			}
 
-			log, err := createLog(dbloc, req.name, logs)
-			if err != nil {
-				req.resp <- logReqResp{nil, err}
-			} else {
+			if req.create {
+
+				createLog(dbloc, req.name)
+
+				log, err := loadLog(dbloc, req.name)
+				if err != nil {
+					req.resp <- logReqResp{nil, err}
+					continue
+				}
 				logs = append(logs, log)
 				req.resp <- logReqResp{log, nil}
+
+				continue
 			}
+
+			req.resp <- logReqResp{}
 
 		}
 	}()
@@ -166,12 +185,41 @@ func findLog(logs []*msgLog, name string) *msgLog {
 	return nil
 }
 
-func createLog(dbloc, name string, logs []*msgLog) (*msgLog, error) {
+/*    way/
+ * create the requested db file with header.
+ */
+func createLog(dbloc, name string) error {
 	loc := path.Join(dbloc, name)
-	_, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	f.Write([]byte(DBHeader))
+	return nil
+}
+
+/*    way/
+ * open the given event log file, read existing records, and set up a
+ * goroutine to handle get and put requests
+ */
+func loadLog(dbloc, name string) (*msgLog, error) {
+	loc := path.Join(dbloc, name)
+	f, err := os.OpenFile(loc, os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
 	}
+	msgs, err := readMsgs(f)
+	if err != nil {
+		return nil, err
+	}
+	nextnum := uint32(1)
+	for _, msg := range msgs {
+		if msg.num >= nextnum {
+			nextnum = msg.num + 1
+		}
+	}
+
 	g := make(chan getReq)
 	p := make(chan putReq)
 	go func() {
@@ -180,10 +228,18 @@ func createLog(dbloc, name string, logs []*msgLog) (*msgLog, error) {
 			case req := <-g:
 				req.resp <- getReqResp{err: errors.New("TODO")}
 			case req := <-p:
-				req.resp <- putReqResp{err: errors.New("TODO")}
+				msg, err := put_(req.sz, req.data, nextnum, f)
+				if err != nil {
+					req.resp <- putReqResp{err: err}
+				} else {
+					msgs = append(msgs, msg)
+					nextnum = msg.num + 1
+					req.resp <- putReqResp{num: msg.num}
+				}
 			}
 		}
 	}()
+
 	return &msgLog{
 		name: name,
 		get:  g,
@@ -191,6 +247,185 @@ func createLog(dbloc, name string, logs []*msgLog) (*msgLog, error) {
 	}, nil
 }
 
+/*    way/
+ * append the message to the end of the file with the correct record
+ * header (KAF|num|sz)
+ */
+func put_(len_ uint32, data io.Reader, num uint32, f *os.File) (*msg, error) {
+	inf, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	off := inf.Size()
+
+	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, len_, RecHeaderSfx)
+	hdr_ := []byte(hdr)
+	if _, err := f.WriteAt(hdr_, off); err != nil {
+		return nil, err
+	}
+	off += int64(len(hdr_))
+
+	sz := uint32(0)
+	buf := make([]byte, 1024)
+	n, err := data.Read(buf)
+	for n > 0 || err == nil {
+		sz += uint32(n)
+		if sz > len_ {
+			break
+		}
+		if n > 0 {
+			if _, err := f.WriteAt(buf[:n], off); err != nil {
+				return nil, err
+			}
+		}
+		if err != nil {
+			break
+		}
+		off += int64(n)
+		n, err = data.Read(buf)
+	}
+	if err != io.EOF {
+		return nil, err
+	}
+
+	if sz != len_ {
+		return nil, errors.New("writing data size incorrect")
+	}
+
+	return &msg{
+		offset: off - int64(len_),
+		num:    num,
+		sz:     sz,
+		data:   nil,
+	}, nil
+
+}
+
+/*    way/
+ * Step through the file, loading message info (skipping the data)
+ */
+func readMsgs(f *os.File) ([]*msg, error) {
+	dbhdr := []byte(DBHeader)
+	hdr := make([]byte, len(dbhdr))
+	if _, err := io.ReadFull(f, hdr); err != nil {
+		return nil, err
+	}
+	if bytes.Compare(dbhdr, hdr) != 0 {
+		return nil, errors.New("invalid db header")
+	}
+
+	var msgs []*msg
+	inf, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	sz := inf.Size()
+	offset := int64(len(DBHeader))
+	for offset < sz {
+		msg, err := readRecInfo(offset, f)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, msg)
+		offset = msg.offset + int64(msg.sz)
+	}
+
+	return msgs, nil
+}
+
+/*    way/
+ * read a chunk of data from the offset that should be big enough to
+ * hold the header (marked off by the newline) and return the message
+ * info from the header.
+ *
+ *    understand/
+ * message header is of the format:
+ *    KAF|<string number>|<string size>\n
+ */
+func readRecInfo(off int64, f *os.File) (*msg, error) {
+	const BIGENOUGH = 32
+	hdr := make([]byte, BIGENOUGH)
+
+	pos := struct {
+		headerStart   bool
+		firstDivider  int
+		secondDivider int
+		headerEnd     int
+	}{false, -1, -1, -1}
+
+	p := 0
+	for {
+		buf := hdr[p:]
+		n, err := f.ReadAt(buf, off+int64(p))
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+
+		for i := 0; i < n; i++ {
+			if !pos.headerStart {
+				if hdr[i] != []byte("\n")[0] {
+					return nil, errors.New("invalid record header start")
+				}
+				pos.headerStart = true
+				p++
+				continue
+			}
+			if hdr[i] == []byte("|")[0] {
+				if pos.firstDivider == -1 {
+					pos.firstDivider = p
+				} else if pos.secondDivider == -1 {
+					pos.secondDivider = p
+				} else {
+					return nil, errors.New("invalid record header: extra '|' found")
+				}
+			}
+			if hdr[i] == []byte(RecHeaderSfx)[0] {
+				pos.headerEnd = p
+				p++
+				break
+			}
+			p++
+		}
+		if pos.headerEnd != -1 || err == io.EOF {
+			break
+		}
+	}
+
+	if pos.firstDivider == -1 {
+		return nil, errors.New("invalid record header: no number")
+	}
+
+	if pos.secondDivider == -1 {
+		return nil, errors.New("invalid record header: no size")
+	}
+
+	if pos.headerEnd == -1 {
+		return nil, errors.New("invalid record header: not terminated correctly")
+	}
+
+	v := string(hdr[pos.firstDivider+1 : pos.secondDivider])
+	num, err := strconv.ParseUint(v, 10, 32)
+	if err != nil {
+		return nil, errors.New("invalid record header message number")
+	}
+	v = string(hdr[pos.secondDivider+1 : pos.headerEnd])
+	sz, err := strconv.ParseUint(v, 10, 32)
+	if err != nil {
+		return nil, errors.New("invalid record header message size")
+	}
+
+	return &msg{
+		offset: off + int64(p),
+		num:    uint32(num),
+		sz:     uint32(sz),
+		data:   nil,
+	}, nil
+
+}
+
+/*    way/
+ * set up the request handlers and start the server
+ */
 func startServer(cfg *config, logsR logsRoutine) {
 	setupRequestHandlers(cfg, logsR)
 
@@ -198,6 +433,9 @@ func startServer(cfg *config, logsR logsRoutine) {
 	log.Fatal(http.ListenAndServe(cfg.addr, nil))
 }
 
+/*    way/
+ * set up our request handlers passing in the context and logs goroutine
+ */
 func setupRequestHandlers(cfg *config, lr logsRoutine) {
 	wrapH := func(h reqHandler) httpHandler {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -207,17 +445,24 @@ func setupRequestHandlers(cfg *config, lr logsRoutine) {
 	http.HandleFunc("/put/", wrapH(put))
 }
 
+/*    way/
+ * helper function that requests logsRoutine for the given log
+ */
 func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
 	c := make(chan logReqResp)
 	logsR.c <- logReq{
-		name:     name,
-		noCreate: !create,
-		resp:     c,
+		name:   name,
+		create: create,
+		resp:   c,
 	}
 	resp := <-c
 	return resp.msglog, resp.err
 }
 
+/*    way/
+ * handle /put/<logname> request, responding with message number added
+ * to event log
+ */
 func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/put/"):])
 	if len(name) == 0 {
@@ -230,19 +475,44 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		return
 	}
 
+	hsz := r.Header["Content-Length"]
+	if len(hsz) == 0 {
+		err_("put: No content-length found", 400, r, w)
+		return
+	}
+	sz, err := strconv.ParseUint(hsz[0], 10, 32)
+	if err != nil {
+		err_("put: Invalid content-length", 400, r, w)
+		return
+	}
+	if sz <= 0 {
+		err_("put: Empty message length", 400, r, w)
+		return
+	}
+
 	c := make(chan putReqResp)
 	msglog.put <- putReq{
+		sz:   uint32(sz),
 		data: r.Body,
 		resp: c,
 	}
 	resp := <-c
-	w.Write([]byte(resp.err.Error()))
+	if resp.err != nil {
+		err_(resp.err.Error(), 500, r, w)
+		return
+	}
+	w.Write([]byte(strconv.FormatUint(uint64(resp.num), 10)))
 }
 
+/*    way/
+ * respond with error helper function
+ */
 func err_(error string, code int, r *http.Request, w http.ResponseWriter) {
 	log.Println("ERROR:", r.RemoteAddr, r.RequestURI, error)
 	http.Error(w, error, code)
 }
+
+/* helper types */
 
 type config struct {
 	addr  string
