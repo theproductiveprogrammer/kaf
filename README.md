@@ -68,10 +68,21 @@ Each message is a JSON record with the following format:
 
 ```
 {
-  startTime: <ISO-Format>,
-  endTime: <ISO-Format>,
-  logfile: { gets: <num>, puts: <num> },
-  logfile: { gets: <num>, puts: <num>, errs: <num> },
+  start: <ISO-Format>,
+  finish: <ISO-Format>,
+  statno: <running stat call number>,
+  logs: [
+  {
+		name: <logfile name>,
+		last: <msg no>,
+		gets: <num>, puts: <num>
+  },
+  {
+		name: <logfile name>,
+		last: <msg no>,
+		gets: <num>, puts: <num>,
+		errs: <num>
+  },
   ...
 }
 ```
