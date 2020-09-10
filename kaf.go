@@ -262,6 +262,8 @@ func getLogsRoutine(dbloc string) logsRoutine {
 						log_.name, log_.stats.getCount, log_.stats.putCount)
 				}
 			}
+      b.WriteRune('}')
+
 			fmt.Println(b.String())
 			b.Reset()
 		}
