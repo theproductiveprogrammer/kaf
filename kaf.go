@@ -70,12 +70,13 @@ type logReqResp struct {
 /*    understand/
  * similar to logsRoutine, each message log is also handled by it's own
  * goroutine. We communicate to it via it's channels - either to get
- * message logs or to put a new message log.
+ * message logs or to put a new message log or get stats.
  */
 type msgLog struct {
-	name string
-	get  chan getReq
-	put  chan putReq
+	name  string
+	get   chan getReq
+	put   chan putReq
+	stats chan statReq
 }
 
 /*    understand/
@@ -102,6 +103,17 @@ type putReq struct {
 type putReqResp struct {
 	num uint32
 	err error
+}
+
+/*    understand/
+ * represents a request to a message log get stats
+ */
+type statReq struct {
+	resp chan statReqResp
+}
+type statReqResp struct {
+	getCount uint32
+	putCount uint32
 }
 
 /*    understand/
@@ -243,8 +255,12 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		}
 	}
 
+	var getCount uint32 = 0
+	var putCount uint32 = 0
+
 	g := make(chan getReq)
 	p := make(chan putReq)
+	s := make(chan statReq)
 	go func() {
 		for {
 			select {
@@ -260,6 +276,10 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					nextnum = msg.num + 1
 					req.resp <- putReqResp{num: msg.num}
 				}
+			case req := <-s:
+				req.resp <- statReqResp{getCount, putCount}
+				getCount = 0
+				putCount = 0
 			}
 		}
 	}()
