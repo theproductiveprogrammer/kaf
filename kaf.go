@@ -127,6 +127,7 @@ type stats struct {
  */
 type msg struct {
 	offset int64
+	start  uint32
 	num    uint32
 	sz     uint32
 	data   []byte
@@ -408,18 +409,28 @@ func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
 }
 
 /*    way/
+ * validate that message header is correct then,
  * read message data from disk
  */
-func readMsg(msg_ msg, f *os.File) (*msg, error) {
+func readMsg(msg__ msg, f *os.File) (*msg, error) {
+
+	msg_, err := readRecInfo(msg__.offset, f)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg__.num != msg_.num {
+		return nil, errors.New("Message number on disk incorrect")
+	}
 
 	data := make([]byte, msg_.sz)
-	_, err := f.ReadAt(data, msg_.offset)
+	_, err = f.ReadAt(data, msg_.offset+int64(msg_.start))
 	if err != nil {
 		return nil, err
 	}
 	msg_.data = data
 
-	return &msg_, nil
+	return msg_, nil
 }
 
 /*    way/
@@ -439,14 +450,15 @@ func put_(data []byte, num uint32, f *os.File) (*msg, error) {
 	if _, err := f.WriteAt(hdr_, off); err != nil {
 		return nil, err
 	}
-	off += int64(len(hdr_))
+	start := uint32(len(hdr_))
 
-	if _, err := f.WriteAt(data, off); err != nil {
+	if _, err := f.WriteAt(data, off+int64(start)); err != nil {
 		return nil, err
 	}
 
 	return &msg{
 		offset: off,
+		start:  start,
 		num:    num,
 		sz:     sz,
 		data:   nil,
@@ -483,7 +495,7 @@ func readMsgs(f *os.File) ([]*msg, error) {
 			msgs = append(msgs, msg)
 		}
 		if msg != nil && msg.sz != 0 {
-			offset = msg.offset + int64(msg.sz)
+			offset = msg.offset + int64(msg.start+msg.sz)
 		}
 	}
 
@@ -533,6 +545,7 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 	if pos.curr == n {
 		return &msg{
 			offset: off,
+			start:  0,
 			num:    0,
 			sz:     uint32(n),
 			data:   nil,
@@ -586,7 +599,8 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 	}
 
 	return &msg{
-		offset: off + int64(pos.headerEnd+1),
+		offset: off,
+		start:  uint32(pos.headerEnd + 1),
 		num:    uint32(num),
 		sz:     uint32(sz),
 		data:   nil,
