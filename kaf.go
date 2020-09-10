@@ -370,8 +370,12 @@ func readMsgs(f *os.File) ([]*msg, error) {
 		if err != nil {
 			return nil, err
 		}
-		msgs = append(msgs, msg)
-		offset = msg.offset + int64(msg.sz)
+		if msg != nil && msg.num > 0 {
+			msgs = append(msgs, msg)
+		}
+		if msg != nil && msg.sz != 0 {
+			offset = msg.offset + int64(msg.sz)
+		}
 	}
 
 	return msgs, nil
@@ -391,48 +395,62 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 	hdr := make([]byte, BIGENOUGH)
 
 	pos := struct {
-		headerStart   bool
+		curr          int
+		headerStart   int
 		firstDivider  int
 		secondDivider int
 		headerEnd     int
-	}{false, -1, -1, -1}
+	}{0, -1, -1, -1, -1}
 
-	p := 0
-	for {
-		buf := hdr[p:]
-		n, err := f.ReadAt(buf, off+int64(p))
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
+	n, err := f.ReadAt(hdr, off)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
 
-		for i := 0; i < n; i++ {
-			if !pos.headerStart {
-				if hdr[i] != []byte("\n")[0] {
-					return nil, errors.New("invalid record header start")
-				}
-				pos.headerStart = true
-				p++
-				continue
-			}
-			if hdr[i] == []byte("|")[0] {
-				if pos.firstDivider == -1 {
-					pos.firstDivider = p
-				} else if pos.secondDivider == -1 {
-					pos.secondDivider = p
-				} else {
-					return nil, errors.New("invalid record header: extra '|' found")
-				}
-			}
-			if hdr[i] == []byte(RecHeaderSfx)[0] {
-				pos.headerEnd = p
-				p++
-				break
-			}
-			p++
-		}
-		if pos.headerEnd != -1 || err == io.EOF {
+	if n == 0 {
+		return nil, nil
+	}
+
+	for ; pos.curr < n; pos.curr++ {
+		if hdr[pos.curr] != '\n' {
 			break
 		}
+	}
+
+	if pos.curr == 0 {
+		return nil, errors.New("invalid record header start")
+	}
+
+	if pos.curr == n {
+		return &msg{
+			offset: off,
+			num:    0,
+			sz:     uint32(n),
+			data:   nil,
+		}, nil
+	}
+
+	pos.headerStart = pos.curr - 1
+
+	for ; pos.curr < n; pos.curr++ {
+		if hdr[pos.curr] == '|' {
+			if pos.firstDivider == -1 {
+				pos.firstDivider = pos.curr
+			} else if pos.secondDivider == -1 {
+				pos.secondDivider = pos.curr
+			} else {
+				return nil, errors.New("invalid record header: extra '|' found")
+			}
+		}
+		if hdr[pos.curr] == []byte(RecHeaderSfx)[0] {
+			pos.headerEnd = pos.curr
+			break
+		}
+	}
+
+	rechdr := hdr[pos.headerStart : pos.firstDivider+1]
+	if bytes.Compare(rechdr, []byte(RecHeaderPfx)) != 0 {
+		return nil, errors.New("invalid record header prefix")
 	}
 
 	if pos.firstDivider == -1 {
@@ -459,7 +477,7 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 	}
 
 	return &msg{
-		offset: off + int64(p),
+		offset: off + int64(pos.headerEnd+1),
 		num:    uint32(num),
 		sz:     uint32(sz),
 		data:   nil,
