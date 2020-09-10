@@ -276,26 +276,26 @@ func loadLog(dbloc, name string) (*msgLog, error) {
  */
 func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
 	var msgs_ []*msg
-  var tot uint32 = 0
-  for i :=0;i < 5;i++ {
-    ndx := num+uint32(i-1)
-    if ndx < uint32(len(msgs)) {
-      m := msgs[ndx]
-      if m != nil {
-        msg_,err := readMsg(*m, f)
-        if err != nil {
-          return nil, err
-        }
-        msgs_ = append(msgs_, msg_)
-        tot += m.sz
-      }
-      if tot >= 256 {
-        break
-      }
-    }
-  }
+	var tot uint32 = 0
+	for i := 0; i < 5; i++ {
+		ndx := num + uint32(i-1)
+		if ndx < uint32(len(msgs)) {
+			m := msgs[ndx]
+			if m != nil {
+				msg_, err := readMsg(*m, f)
+				if err != nil {
+					return nil, err
+				}
+				msgs_ = append(msgs_, msg_)
+				tot += m.sz
+			}
+			if tot >= 256 {
+				break
+			}
+		}
+	}
 
-  return msgs_, nil
+	return msgs_, nil
 }
 
 /*    way/
