@@ -70,16 +70,9 @@ Each message is a JSON record with the following format:
 {
   startTime: <ISO-Format>,
   endTime: <ISO-Format>,
-  gets: [
-    { logfile: ..., num: ... },
-    { logfile: ..., num: ... },
-    ...
-  ],
-  puts: [
-    { logfile: ..., num: ... },
-    { logfile: ..., num: ... },
-    ...
-  ],
+  logfile: { gets: <num>, puts: <num> },
+  logfile: { gets: <num>, puts: <num>, errs: <num> },
+  ...
 }
 ```
 
