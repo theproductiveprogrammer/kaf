@@ -78,12 +78,12 @@ type msgLog struct {
  * a channel where we expect the responses
  */
 type getReq struct {
-	num  int
+	num  uint32
 	resp chan getReqResp
 }
 type getReqResp struct {
-	msg []msg
-	err error
+	msgs []*msg
+	err  error
 }
 
 /*    understand/
@@ -243,7 +243,8 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		for {
 			select {
 			case req := <-g:
-				req.resp <- getReqResp{err: errors.New("TODO")}
+				msgs_, err := get_(req.num, msgs, f)
+				req.resp <- getReqResp{msgs_, err}
 			case req := <-p:
 				msg, err := put_(req.data, nextnum, f)
 				if err != nil {
@@ -262,6 +263,31 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		get:  g,
 		put:  p,
 	}, nil
+}
+
+/*    way/
+ * return the requested message from disk
+ */
+func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
+	var msg_ msg
+	for _, m := range msgs {
+		if m.num == num {
+			msg_ = *m
+			break
+		}
+	}
+	if msg_.num == 0 {
+		return nil, nil
+	}
+
+	data := make([]byte, msg_.sz)
+	_, err := f.ReadAt(data, msg_.offset)
+	if err != nil {
+		return nil, err
+	}
+	msg_.data = data
+
+	return []*msg{&msg_}, nil
 }
 
 /*    way/
@@ -437,6 +463,7 @@ func setupRequestHandlers(cfg *config, lr logsRoutine) {
 			h(cfg, r, lr, w)
 		}
 	}
+	http.HandleFunc("/get/", wrapH(get))
 	http.HandleFunc("/put/", wrapH(put))
 }
 
@@ -452,6 +479,67 @@ func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
 	}
 	resp := <-c
 	return resp.msglog, resp.err
+}
+
+/*    way/
+ * handle /get/<logname>?from=num request, responding with messages from
+ * the event log
+ */
+func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
+	name := strings.TrimSpace(r.URL.Path[len("/get/"):])
+	if len(name) == 0 {
+		err_("Missing event log name", 400, r, w)
+		return
+	}
+
+	qv := r.URL.Query()["from"]
+	if qv == nil || len(qv) == 0 {
+		err_("get: Missing 'from' message number", 400, r, w)
+		return
+	}
+	num, err := strconv.ParseUint(qv[0], 10, 32)
+	if err != nil || num < 1 {
+		err_("get: Invalid 'from' message number", 400, r, w)
+		return
+	}
+
+	msglog, err := getLog(name, logsR, false)
+	if err != nil {
+		err_(err.Error(), 500, r, w)
+		return
+	}
+
+	var msgs []*msg
+	if msglog != nil {
+		c := make(chan getReqResp)
+		msglog.get <- getReq{
+			num:  uint32(num),
+			resp: c,
+		}
+		resp := <-c
+		if resp.err != nil {
+			err_(resp.err.Error(), 500, r, w)
+			return
+		}
+		msgs = resp.msgs
+	}
+
+	hdr := fmt.Sprintf("KAF|%d", len(msgs))
+	if _, err := w.Write([]byte(hdr)); err != nil {
+		err_("get: failed sending data back", 500, r, w)
+		return
+	}
+	for _, m := range msgs {
+		hdr := fmt.Sprintf("\nKAF|%d|%d\n", m.num, m.sz)
+		if _, err := w.Write([]byte(hdr)); err != nil {
+			err_("get: failed sending data back", 500, r, w)
+			return
+		}
+		if _, err := w.Write(m.data); err != nil {
+			err_("get: failed sending data back", 500, r, w)
+			return
+		}
+	}
 }
 
 /*    way/
