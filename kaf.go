@@ -240,7 +240,7 @@ func getLogsRoutine(dbloc string) logsRoutine {
 			for _, log_ := range logs {
 				log_.stat <- statReq{resp: c}
 				log_.stats = <-c
-				if hasStats(log_) {
+				if log_.name != "_kaf" && hasStats(log_) {
 					isEmpty = false
 				}
 			}
