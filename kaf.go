@@ -118,6 +118,7 @@ type statReq struct {
  * relevant stats for a message log
  */
 type stats struct {
+	lastmsg  uint32
 	getCount uint32
 	putCount uint32
 	errCount uint32
@@ -220,10 +221,6 @@ func getLogsRoutine(dbloc string) logsRoutine {
 
 	logsR := logsRoutine{c}
 
-	hasStats := func(log_ *msgLog) bool {
-		return log_.stats.getCount > 0 || log_.stats.putCount > 0
-	}
-
 	ticker := time.NewTicker(5 * time.Minute)
 	var statCount uint32 = 0
 	go func() {
@@ -257,28 +254,7 @@ func getLogsRoutine(dbloc string) logsRoutine {
 				continue
 			}
 
-			b.WriteString("{\"startTime\":\"")
-			b.WriteString(start.UTC().Format(time.RFC3339))
-			b.WriteString("\",\"endTime\":\"")
-			b.WriteString(end.UTC().Format(time.RFC3339))
-			fmt.Fprintf(&b, "\",\"stat\":%d,", statCount)
-			firstDone := false
-			for _, log_ := range logs {
-				if hasStats(log_) {
-					if firstDone {
-						b.WriteRune(',')
-					}
-					firstDone = true
-					if log_.stats.errCount > 0 {
-						fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d,\"err\":%d}",
-							log_.name, log_.stats.getCount, log_.stats.putCount, log_.stats.errCount)
-					} else {
-						fmt.Fprintf(&b, "\"%s\":{\"gets\":%d,\"puts\":%d}",
-							log_.name, log_.stats.getCount, log_.stats.putCount)
-					}
-				}
-			}
-			b.WriteRune('}')
+			toJSON(logs, statCount, start, end, &b)
 
 			c := make(chan putReqResp)
 			msglog.put <- putReq{
@@ -289,11 +265,56 @@ func getLogsRoutine(dbloc string) logsRoutine {
 			if resp.err != nil {
 				log.Println(err)
 			}
-			b.Reset()
 		}
 	}()
 
 	return logsR
+}
+
+func hasStats(log_ *msgLog) bool {
+	return log_.stats.getCount > 0 || log_.stats.putCount > 0
+}
+
+func toJSON(logs []*msgLog,
+	statCount uint32, start, end time.Time,
+	b *strings.Builder) {
+
+	b.Reset()
+
+	b.WriteString(`{"start":"`)
+	b.WriteString(start.UTC().Format(time.RFC3339))
+	b.WriteString(`","end":"`)
+	b.WriteString(end.UTC().Format(time.RFC3339))
+	fmt.Fprintf(b, `","statno":%d,"logs":[`, statCount)
+
+	for i, log_ := range logs {
+
+		if log_.stats.errCount > 0 {
+			fmt.Fprintf(b,
+				`{"name":"%s","last":%d,"gets":%d,"puts":%d,"errs":%d}`,
+				log_.name,
+				log_.stats.lastmsg,
+				log_.stats.getCount, log_.stats.putCount,
+				log_.stats.errCount)
+		} else if hasStats(log_) {
+			fmt.Fprintf(b,
+				`{"name":"%s","last":%d,"gets":%d,"puts":%d}`,
+				log_.name,
+				log_.stats.lastmsg,
+				log_.stats.getCount, log_.stats.putCount)
+		} else {
+			fmt.Fprintf(b,
+				`{"name":"%s","last":%d}`,
+				log_.name,
+				log_.stats.lastmsg)
+		}
+
+		if i != len(logs)-1 {
+			b.WriteRune(',')
+		}
+	}
+
+	b.WriteString("]}")
 }
 
 func logExists(dbloc, name string) bool {
@@ -378,7 +399,8 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					req.resp <- putReqResp{num: msg.num}
 				}
 			case req := <-s:
-				req.resp <- stats{getCount, putCount, errCount}
+				lastmsg := nextnum - 1
+				req.resp <- stats{lastmsg, getCount, putCount, errCount}
 				getCount = 0
 				putCount = 0
 				errCount = 0
