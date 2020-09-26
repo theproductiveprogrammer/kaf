@@ -733,7 +733,7 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		return
 	}
 	for _, m := range msgs {
-		hdr := fmt.Sprintf("\nKAF|%d|%d\n", m.num, m.sz)
+		hdr := fmt.Sprintf("\%s%d|%d\n", RecHeaderPfx, m.num, m.sz)
 		if _, err := w.Write([]byte(hdr)); err != nil {
 			err_("get: failed sending data back", 500, r, w)
 			return
