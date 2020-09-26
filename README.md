@@ -88,5 +88,4 @@ Each message is a JSON record with the following format:
 }
 ```
 
-These can be accessed as usual with: `/get/_kaf?from=…` 
-
+These can be accessed as usual with: `/get/_kaf?from=…`
