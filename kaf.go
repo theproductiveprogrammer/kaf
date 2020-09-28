@@ -686,7 +686,8 @@ func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
 
 /*    way/
  * handle /get/<logname>?from=num request, responding with messages from
- * the event log
+ * the event log and correctly setting Content-Length and Content-Type
+ * for efficiency
  */
 func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/get/"):])
@@ -727,13 +728,24 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		msgs = resp.msgs
 	}
 
-	hdr := fmt.Sprintf("%s|%d", RespHeaderPfx, len(msgs))
-	if _, err := w.Write([]byte(hdr)); err != nil {
+	respHdr := fmt.Sprintf("%s|%d", RespHeaderPfx, len(msgs))
+	respSz := len(respHdr)
+	msgHdrs := make([][]byte, len(msgs))
+	for i, m := range msgs {
+		msgHdrs[i] = []byte(fmt.Sprintf("%s%d|%d\n", RecHeaderPfx, m.num, m.sz))
+		respSz += len(msgHdrs[i])
+		respSz += len(m.data)
+	}
+
+	w.Header().Add("Content-Type", "application/octet-stream")
+	w.Header().Add("Content-Length", strconv.FormatUint(uint64(respSz), 10))
+
+	if _, err := w.Write([]byte(respHdr)); err != nil {
 		err_("get: failed sending data back", 500, r, w)
 		return
 	}
-	for _, m := range msgs {
-		hdr := fmt.Sprintf("%s%d|%d\n", RecHeaderPfx, m.num, m.sz)
+	for i, m := range msgs {
+		hdr := msgHdrs[i]
 		if _, err := w.Write([]byte(hdr)); err != nil {
 			err_("get: failed sending data back", 500, r, w)
 			return
@@ -800,6 +812,8 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		err_(resp.err.Error(), 500, r, w)
 		return
 	}
+
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(strconv.FormatUint(uint64(resp.num), 10)))
 }
 
