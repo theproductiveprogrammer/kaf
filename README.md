@@ -89,3 +89,19 @@ Each message is a JSON record with the following format:
 ```
 
 These can be accessed as usual with: `/get/_kaf?from=…`
+
+## Archival
+
+Sometimes logs can get too big and we don’t need all that old data. We can tell **Kaf** to switch over to a new message log file (the old log file is saved with the name `--name--<datetime>`).
+
+Because we don’t want to have to coordinate across multiple services that may use the log we can ask **Kaf** to copy across some of the latest messages so they are still available.
+
+Request archival of the log using: (HTTP POST)
+
+```
+/archive/logfile?upto=<msgnum>
+```
+
+Once archived **Kaf** releases any file handles to the log file and you can move it out of the directory or delete it or back it up as you wish.
+
+---
