@@ -648,26 +648,36 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 }
 
 /*    way/
- * set up the request handlers and start the server
+ * setup the server with the correct configuration and handlers and
+ * start it up
  */
 func startServer(cfg *config, logsR logsRoutine) {
-	setupRequestHandlers(cfg, logsR)
+
+  s := &http.Server{
+    Addr:           cfg.addr,
+    Handler:        requestHandlers(cfg, logsR),
+    ReadTimeout:    time.Second,
+    WriteTimeout:   time.Second,
+    MaxHeaderBytes: 4096,
+  }
 
 	log.Println("Starting server on", cfg.addr, "writing to", cfg.dbloc)
-	log.Fatal(http.ListenAndServe(cfg.addr, nil))
+	log.Fatal(s.ListenAndServe())
 }
 
 /*    way/
- * set up our request handlers passing in the context and logs goroutine
+ * return a mux with our request handlers
  */
-func setupRequestHandlers(cfg *config, lr logsRoutine) {
+func requestHandlers(cfg *config, lr logsRoutine) *http.ServeMux {
 	wrapH := func(h reqHandler) httpHandler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			h(cfg, r, lr, w)
 		}
 	}
-	http.HandleFunc("/get/", wrapH(get))
-	http.HandleFunc("/put/", wrapH(put))
+  mux := http.NewServeMux()
+	mux.HandleFunc("/get/", wrapH(get))
+	mux.HandleFunc("/put/", wrapH(put))
+  return mux
 }
 
 /*    way/
