@@ -77,6 +77,7 @@ type msgLog struct {
 	name  string
 	get   chan getReq
 	put   chan putReq
+	ach   chan archiveReq
 	stat  chan statReq
 	stats stats
 }
@@ -108,6 +109,18 @@ type putReqResp struct {
 }
 
 /*    understand/
+ * represents a request to a message log archive the log and continue
+ * with a new log.
+ */
+type archiveReq struct {
+	upto uint32
+	resp chan achReqResp
+}
+type achReqResp struct {
+	err error
+}
+
+/*    understand/
  * represents a request to a message log get stats
  */
 type statReq struct {
@@ -121,6 +134,7 @@ type stats struct {
 	lastmsg  uint32
 	getCount uint32
 	putCount uint32
+	achCount uint32
 	errCount uint32
 }
 
@@ -392,11 +406,13 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 
 	var getCount uint32 = 0
 	var putCount uint32 = 0
+	var achCount uint32 = 0
 	var errCount uint32 = 0
 
 	g := make(chan getReq)
 	p := make(chan putReq)
 	s := make(chan statReq)
+  a := make(chan archiveReq)
 	go func() {
 		for {
 			select {
@@ -418,11 +434,20 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					nextnum = msg.num + 1
 					req.resp <- putReqResp{num: msg.num}
 				}
+      case req := <-a:
+        achCount++
+        var err error
+        msgs, f, err = archive_(name, req.upto, msgs, f)
+        if err != nil {
+          errCount++
+        }
+        req.resp <- achReqResp{err}
 			case req := <-s:
 				lastmsg := nextnum - 1
-				req.resp <- stats{lastmsg, getCount, putCount, errCount}
+				req.resp <- stats{lastmsg, getCount, putCount, achCount, errCount}
 				getCount = 0
 				putCount = 0
+        achCount = 0
 				errCount = 0
 			}
 		}
@@ -432,9 +457,21 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		name: name,
 		get:  g,
 		put:  p,
+    ach:  a,
 		stat: s,
 	}, nil
 }
+
+/*    way/
+ * close the file handle, rename the existing file, then reopen the new
+ * file to read any pending messages. Create a new log file and copy
+ * across any pending messages
+ */
+func archive_(name string, upto uint32, msgs []*msg, f *os.File)([]*msg,*os.File, error) {
+  f.Close()
+  return nil, nil, errors.New("testing")
+}
+
 
 /*    way/
  * return a few messages (max 5 || size < 256) to the user
@@ -697,6 +734,7 @@ func requestHandlers(cfg *config, lr logsRoutine) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/get/", wrapH(get))
 	mux.HandleFunc("/put/", wrapH(put))
+	mux.HandleFunc("/archive/", wrapH(archive))
 	return mux
 }
 
@@ -845,6 +883,45 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 
 	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte(strconv.FormatUint(uint64(resp.num), 10)))
+}
+
+/*    way/
+ * handle /archive/<logname>?upto=num request
+ */
+func archive(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
+	name := strings.TrimSpace(r.URL.Path[len("/archive/"):])
+	if isHidden(name) {
+		err_("archive: invalid log name", 400, r, w)
+		return
+	}
+
+	qv := r.URL.Query()["upto"]
+	if qv == nil || len(qv) == 0 {
+		err_("archive: Missing 'upto' message number", 400, r, w)
+		return
+	}
+	num, err := strconv.ParseUint(qv[0], 10, 32)
+	if err != nil || num < 1 {
+		err_("archive: Invalid 'upto' message number", 400, r, w)
+		return
+	}
+
+	msglog, err := getLog(name, logsR, false)
+	if err != nil || msglog == nil {
+    err_("archive: Invalid log", 400, r, w)
+		return
+	}
+
+  c := make(chan achReqResp)
+  msglog.ach <- archiveReq {
+    upto:  uint32(num),
+    resp: c,
+  }
+  resp := <-c
+  if resp.err != nil {
+    err_(resp.err.Error(), 500, r, w)
+    return
+  }
 }
 
 /*    way/
