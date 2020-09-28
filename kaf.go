@@ -182,6 +182,9 @@ func getLogsRoutine(dbloc string) logsRoutine {
 		log.Panic("Failed to read:", dbloc)
 	}
 	for _, f := range files {
+    if isHidden(f.Name()) {
+      continue
+    }
 		log_, err := loadLog(dbloc, f.Name())
 		if err != nil {
 			log.Println(err)
@@ -269,6 +272,23 @@ func getLogsRoutine(dbloc string) logsRoutine {
 	}()
 
 	return logsR
+}
+
+/*    understand/
+ * ignore empty filenames, dot files, and 'archived' files i(those
+ * starting with --)
+ */
+func isHidden(name string) bool {
+  if len(name) == 0 {
+    return true
+  }
+  if name[0] == '.' {
+    return true
+  }
+  if strings.HasPrefix(name, "--") {
+    return true
+  }
+  return false
 }
 
 func hasStats(log_ *msgLog) bool {
