@@ -1,6 +1,7 @@
 package main
 
 import (
+  "path/filepath"
 	"bytes"
 	"errors"
 	"fmt"
@@ -437,7 +438,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
       case req := <-a:
         achCount++
         var err error
-        msgs, f, err = archive_(name, req.upto, msgs, f)
+        msgs, f, err = archive_(loc, req.upto, msgs, f)
         if err != nil {
           errCount++
         }
@@ -467,9 +468,16 @@ func loadLog(dbloc, name string) (*msgLog, error) {
  * file to read any pending messages. Create a new log file and copy
  * across any pending messages
  */
-func archive_(name string, upto uint32, msgs []*msg, f *os.File)([]*msg,*os.File, error) {
+func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File)([]*msg,*os.File, error) {
   f.Close()
-  return nil, nil, errors.New("testing")
+  t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
+  name := filepath.Base(dbloc)
+  achname := fmt.Sprintf("--%s--%s", name, t)
+  achloc := filepath.Join(filepath.Dir(dbloc), achname)
+  if err := os.Rename(dbloc, achloc); err != nil {
+    return nil, nil, err
+  }
+  return nil,nil,nil
 }
 
 
