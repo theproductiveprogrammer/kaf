@@ -1,7 +1,6 @@
 package main
 
 import (
-  "path/filepath"
 	"bytes"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -413,7 +413,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 	g := make(chan getReq)
 	p := make(chan putReq)
 	s := make(chan statReq)
-  a := make(chan archiveReq)
+	a := make(chan archiveReq)
 	go func() {
 		for {
 			select {
@@ -435,20 +435,20 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 					nextnum = msg.num + 1
 					req.resp <- putReqResp{num: msg.num}
 				}
-      case req := <-a:
-        achCount++
-        var err error
-        msgs, f, err = archive_(loc, req.upto, msgs, f)
-        if err != nil {
-          errCount++
-        }
-        req.resp <- achReqResp{err}
+			case req := <-a:
+				achCount++
+				var err error
+				msgs, f, err = archive_(loc, req.upto, msgs, f)
+				if err != nil {
+					errCount++
+				}
+				req.resp <- achReqResp{err}
 			case req := <-s:
 				lastmsg := nextnum - 1
 				req.resp <- stats{lastmsg, getCount, putCount, achCount, errCount}
 				getCount = 0
 				putCount = 0
-        achCount = 0
+				achCount = 0
 				errCount = 0
 			}
 		}
@@ -458,7 +458,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		name: name,
 		get:  g,
 		put:  p,
-    ach:  a,
+		ach:  a,
 		stat: s,
 	}, nil
 }
@@ -468,18 +468,17 @@ func loadLog(dbloc, name string) (*msgLog, error) {
  * file to read any pending messages. Create a new log file and copy
  * across any pending messages
  */
-func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File)([]*msg,*os.File, error) {
-  f.Close()
-  t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
-  name := filepath.Base(dbloc)
-  achname := fmt.Sprintf("--%s--%s", name, t)
-  achloc := filepath.Join(filepath.Dir(dbloc), achname)
-  if err := os.Rename(dbloc, achloc); err != nil {
-    return nil, nil, err
-  }
-  return nil,nil,nil
+func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File) ([]*msg, *os.File, error) {
+	f.Close()
+	t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
+	name := filepath.Base(dbloc)
+	achname := fmt.Sprintf("--%s--%s", name, t)
+	achloc := filepath.Join(filepath.Dir(dbloc), achname)
+	if err := os.Rename(dbloc, achloc); err != nil {
+		return nil, nil, err
+	}
+	return nil, nil, nil
 }
-
 
 /*    way/
  * return a few messages (max 5 || size < 256) to the user
@@ -916,20 +915,20 @@ func archive(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWri
 
 	msglog, err := getLog(name, logsR, false)
 	if err != nil || msglog == nil {
-    err_("archive: Invalid log", 400, r, w)
+		err_("archive: Invalid log", 400, r, w)
 		return
 	}
 
-  c := make(chan achReqResp)
-  msglog.ach <- archiveReq {
-    upto:  uint32(num),
-    resp: c,
-  }
-  resp := <-c
-  if resp.err != nil {
-    err_(resp.err.Error(), 500, r, w)
-    return
-  }
+	c := make(chan achReqResp)
+	msglog.ach <- archiveReq{
+		upto: uint32(num),
+		resp: c,
+	}
+	resp := <-c
+	if resp.err != nil {
+		err_(resp.err.Error(), 500, r, w)
+		return
+	}
 }
 
 /*    way/
