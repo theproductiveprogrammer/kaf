@@ -182,9 +182,9 @@ func getLogsRoutine(dbloc string) logsRoutine {
 		log.Panic("Failed to read:", dbloc)
 	}
 	for _, f := range files {
-    if isHidden(f.Name()) {
-      continue
-    }
+		if isHidden(f.Name()) {
+			continue
+		}
 		log_, err := loadLog(dbloc, f.Name())
 		if err != nil {
 			log.Println(err)
@@ -279,16 +279,16 @@ func getLogsRoutine(dbloc string) logsRoutine {
  * starting with --)
  */
 func isHidden(name string) bool {
-  if len(name) == 0 {
-    return true
-  }
-  if name[0] == '.' {
-    return true
-  }
-  if strings.HasPrefix(name, "--") {
-    return true
-  }
-  return false
+	if len(name) == 0 {
+		return true
+	}
+	if name[0] == '.' {
+		return true
+	}
+	if strings.HasPrefix(name, "--") {
+		return true
+	}
+	return false
 }
 
 func hasStats(log_ *msgLog) bool {
@@ -721,8 +721,8 @@ func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
  */
 func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/get/"):])
-  if isHidden(name) {
-    err_("get: invalid log name", 400, r, w)
+	if isHidden(name) {
+		err_("get: invalid log name", 400, r, w)
 		return
 	}
 
@@ -793,8 +793,8 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
  */
 func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/put/"):])
-  if isHidden(name) {
-    err_("put: invalid log name", 400, r, w)
+	if isHidden(name) {
+		err_("put: invalid log name", 400, r, w)
 		return
 	}
 	msglog, err := getLog(name, logsR, true)
