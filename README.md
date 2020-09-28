@@ -16,7 +16,7 @@ $> go run kaf.go <addr> <path to data folder>
 
 *Example:* `go run kaf.go 127.0.0.1:7749 ../kaf-data`
 
-Save data using:
+Save data using: (HTTP POST)
 
 ```
 /put/logfile
@@ -26,7 +26,7 @@ POSTED Message Data
 
 *Example:* `curl localhost:7749 /put/testlog -d @notes`
 
-Get messages using:
+Get messages using: (HTTP GET)
 
 ```
 /get/logfile?from=<msg number>
@@ -58,7 +58,7 @@ Message Data
 ...
 ```
 
-Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) / [edit](https://www.vim.org) and examine.
+Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) /[`tail`](https://en.wikipedia.org/wiki/Tail_(Unix)) / [edit](https://www.vim.org) and examine.
 
 ## Transparency
 
