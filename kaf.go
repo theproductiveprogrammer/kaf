@@ -619,7 +619,12 @@ func put_(data []byte, msglog *msgLog) putReqResp {
 		return putReqResp{0, err}
 	}
 	if msglog.size != inf.Size() {
-		loadLogFile(msglog)
+    if !fileExists(msglog.loc) {
+      createLogFile(msglog.loc, 0)
+    }
+    if err := loadLogFile(msglog); err != nil {
+      return putReqResp{0, err}
+    }
 	}
 	off := inf.Size()
 	num := msglog.lastmsg + 1
