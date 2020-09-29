@@ -619,12 +619,12 @@ func put_(data []byte, msglog *msgLog) putReqResp {
 		return putReqResp{0, err}
 	}
 	if msglog.size != inf.Size() {
-    if !fileExists(msglog.loc) {
-      createLogFile(msglog.loc, 0)
-    }
-    if err := loadLogFile(msglog); err != nil {
-      return putReqResp{0, err}
-    }
+		if !fileExists(msglog.loc) {
+			createLogFile(msglog.loc, 0)
+		}
+		if err := loadLogFile(msglog); err != nil {
+			return putReqResp{0, err}
+		}
 	}
 	off := inf.Size()
 	num := msglog.lastmsg + 1
@@ -642,7 +642,7 @@ func put_(data []byte, msglog *msgLog) putReqResp {
 		return putReqResp{0, err}
 	}
 
-  msglog.msgOs = append(msglog.msgOs, msgOff{num,off})
+	msglog.msgOs = append(msglog.msgOs, msgOff{num, off})
 
 	return putReqResp{num, nil}
 }
