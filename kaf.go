@@ -157,6 +157,15 @@ type msg struct {
 	data   []byte
 }
 
+/*    understand/
+ * hold an offset to the message in the message log so it's easy to get
+ * to and read
+ */
+type msgOff struct {
+	num    uint32
+	offset int64
+}
+
 /*
  * Data File constants
  */
@@ -434,14 +443,14 @@ func loadLog(name, loc string) (*logRoutine, error) {
 	if err != nil {
 		return nil, err
 	}
-	msgs, err := readMsgs(f)
+	msgOs, err := loadMsgOffsets(f)
 	if err != nil {
 		return nil, err
 	}
 	nextnum := uint32(1)
-	for _, msg := range msgs {
-		if msg.num >= nextnum {
-			nextnum = msg.num + 1
+	for _, mo := range msgOs {
+		if mo.num >= nextnum {
+			nextnum = mo.num + 1
 		}
 	}
 
@@ -459,26 +468,26 @@ func loadLog(name, loc string) (*logRoutine, error) {
 			select {
 			case req := <-g:
 				getCount++
-				msgs_, err := get_(req.num, msgs, f)
+				msgs, err := get_(req.num, msgOs, f)
 				if err != nil {
 					errCount++
 				}
-				req.resp <- getReqResp{msgs_, err}
+				req.resp <- getReqResp{msgs, err}
 			case req := <-p:
 				putCount++
-				msg, err := put_(req.data, nextnum, f)
+				mo, err := put_(req.data, nextnum, f)
 				if err != nil {
 					errCount++
 					req.resp <- putReqResp{err: err}
 				} else {
-					msgs = append(msgs, msg)
-					nextnum = msg.num + 1
-					req.resp <- putReqResp{num: msg.num}
+					msgOs = append(msgOs, mo)
+					nextnum = mo.num + 1
+					req.resp <- putReqResp{num: mo.num}
 				}
 			case req := <-a:
 				achCount++
 				var err error
-				msgs, f, err = archive_(loc, req.upto, msgs, f)
+				msgOs, f, err = archive_(loc, req.upto, msgOs, f)
 				if err != nil {
 					errCount++
 				}
@@ -508,7 +517,7 @@ func loadLog(name, loc string) (*logRoutine, error) {
  * file to read any pending messages. Create a new log file and copy
  * across any pending messages
  */
-func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File) ([]*msg, *os.File, error) {
+func archive_(dbloc string, upto uint32, msgOs []msgOff, f *os.File) ([]msgOff, *os.File, error) {
 	f.Close()
 	t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
 	name := filepath.Base(dbloc)
@@ -523,21 +532,19 @@ func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File) ([]*msg, *os.F
 /*    way/
  * return a few messages (max 5 || size < 256) to the user
  */
-func get_(num uint32, memmsgs []*msg, f *os.File) ([]*msg, error) {
+func get_(num uint32, msgOs []msgOff, f *os.File) ([]*msg, error) {
 	var msgs []*msg
 	var tot uint32 = 0
 	for i := 0; i < 5; i++ {
 		ndx := num + uint32(i-1)
-		if ndx < uint32(len(memmsgs)) {
-			memmsg := memmsgs[ndx]
-			if memmsg != nil {
-				msg, err := readMsg(memmsg, f)
-				if err != nil {
-					return nil, err
-				}
-				msgs = append(msgs, msg)
-				tot += msg.sz
+		if ndx < uint32(len(msgOs)) {
+			mo := msgOs[ndx]
+			msg, err := readMsg(mo, f)
+			if err != nil {
+				return nil, err
 			}
+			msgs = append(msgs, msg)
+			tot += msg.sz
 			if tot >= 256 {
 				break
 			}
@@ -551,18 +558,19 @@ func get_(num uint32, memmsgs []*msg, f *os.File) ([]*msg, error) {
  * validate that message header is correct then,
  * read message data from disk
  */
-func readMsg(memmsg *msg, f *os.File) (*msg, error) {
+func readMsg(mo msgOff, f *os.File) (*msg, error) {
 
-	msg, err := readRecInfo(memmsg.offset, f)
+	msg, err := readRecInfo(mo.offset, f)
 	if err != nil {
 		return nil, err
 	}
 
-	if msg == nil {
-		return nil, errors.New("Message missing")
+	if msg.num == 0 {
+		m := fmt.Sprintf("No message data found at offset %d for msg %d", mo.offset, mo.num)
+		return nil, errors.New(m)
 	}
 
-	if memmsg.num != msg.num {
+	if mo.num != msg.num {
 		return nil, errors.New("Message number on disk incorrect")
 	}
 
@@ -573,17 +581,17 @@ func readMsg(memmsg *msg, f *os.File) (*msg, error) {
 	}
 	msg.data = data
 
-	return msg, nil
+	return &msg, nil
 }
 
 /*    way/
  * read in the message then append it to the end of the file with the
  * correct record header (KAF|num|sz)
  */
-func put_(data []byte, num uint32, f *os.File) (*msg, error) {
+func put_(data []byte, num uint32, f *os.File) (msgOff, error) {
 	inf, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return msgOff{}, err
 	}
 	off := inf.Size()
 
@@ -591,28 +599,25 @@ func put_(data []byte, num uint32, f *os.File) (*msg, error) {
 	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, sz, RecHeaderSfx)
 	hdr_ := []byte(hdr)
 	if _, err := f.WriteAt(hdr_, off); err != nil {
-		return nil, err
+		return msgOff{}, err
 	}
 	start := uint32(len(hdr_))
 
 	if _, err := f.WriteAt(data, off+int64(start)); err != nil {
-		return nil, err
+		return msgOff{}, err
 	}
 
-	return &msg{
-		offset: off,
-		start:  start,
+	return msgOff{
 		num:    num,
-		sz:     sz,
-		data:   nil,
+		offset: off,
 	}, nil
 
 }
 
 /*    way/
- * Step through the file, loading message info (skipping the data)
+ * Step through the file, loading message offsets
  */
-func readMsgs(f *os.File) ([]*msg, error) {
+func loadMsgOffsets(f *os.File) ([]msgOff, error) {
 	dbhdr := []byte(DBHeader)
 	hdr := make([]byte, len(dbhdr))
 	if _, err := io.ReadFull(f, hdr); err != nil {
@@ -622,7 +627,7 @@ func readMsgs(f *os.File) ([]*msg, error) {
 		return nil, errors.New("invalid db header")
 	}
 
-	var msgs []*msg
+	var msgOs []msgOff
 	inf, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -634,15 +639,15 @@ func readMsgs(f *os.File) ([]*msg, error) {
 		if err != nil {
 			return nil, err
 		}
-		if msg != nil && msg.num > 0 {
-			msgs = append(msgs, msg)
+		if msg.num > 0 {
+			msgOs = append(msgOs, msgOff{msg.num, msg.offset})
 		}
-		if msg != nil && msg.sz != 0 {
+		if msg.sz != 0 {
 			offset = msg.offset + int64(msg.start+msg.sz)
 		}
 	}
 
-	return msgs, nil
+	return msgOs, nil
 }
 
 /*    way/
@@ -654,7 +659,7 @@ func readMsgs(f *os.File) ([]*msg, error) {
  * message header is of the format:
  *    KAF|<string number>|<string size>\n
  */
-func readRecInfo(off int64, f *os.File) (*msg, error) {
+func readRecInfo(off int64, f *os.File) (msg, error) {
 	const BIGENOUGH = 32
 	hdr := make([]byte, BIGENOUGH)
 
@@ -668,11 +673,12 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 
 	n, err := f.ReadAt(hdr, off)
 	if err != nil && err != io.EOF {
-		return nil, err
+		return msg{}, err
 	}
 
 	if n == 0 {
-		return nil, nil
+		m := fmt.Sprintf("read at offset %d failed", off)
+		return msg{}, errors.New(m)
 	}
 
 	for ; pos.curr < n; pos.curr++ {
@@ -682,15 +688,15 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 	}
 
 	if pos.curr == 0 {
-		return nil, errors.New("invalid record header start")
+		return msg{}, errors.New("invalid record header start")
 	}
 
 	if pos.curr == n {
-		return &msg{
+		return msg{
 			offset: off,
-			start:  0,
+			start:  uint32(n),
 			num:    0,
-			sz:     uint32(n),
+			sz:     0,
 			data:   nil,
 		}, nil
 	}
@@ -704,7 +710,7 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 			} else if pos.secondDivider == -1 {
 				pos.secondDivider = pos.curr
 			} else {
-				return nil, errors.New("invalid record header: extra '|' found")
+				return msg{}, errors.New("invalid record header: extra '|' found")
 			}
 		}
 		if hdr[pos.curr] == []byte(RecHeaderSfx)[0] {
@@ -715,33 +721,33 @@ func readRecInfo(off int64, f *os.File) (*msg, error) {
 
 	rechdr := hdr[pos.headerStart : pos.firstDivider+1]
 	if bytes.Compare(rechdr, []byte(RecHeaderPfx)) != 0 {
-		return nil, errors.New("invalid record header prefix")
+		return msg{}, errors.New("invalid record header prefix")
 	}
 
 	if pos.firstDivider == -1 {
-		return nil, errors.New("invalid record header: no number")
+		return msg{}, errors.New("invalid record header: no number")
 	}
 
 	if pos.secondDivider == -1 {
-		return nil, errors.New("invalid record header: no size")
+		return msg{}, errors.New("invalid record header: no size")
 	}
 
 	if pos.headerEnd == -1 {
-		return nil, errors.New("invalid record header: not terminated correctly")
+		return msg{}, errors.New("invalid record header: not terminated correctly")
 	}
 
 	v := string(hdr[pos.firstDivider+1 : pos.secondDivider])
 	num, err := strconv.ParseUint(v, 10, 32)
 	if err != nil {
-		return nil, errors.New("invalid record header message number")
+		return msg{}, errors.New("invalid record header message number")
 	}
 	v = string(hdr[pos.secondDivider+1 : pos.headerEnd])
 	sz, err := strconv.ParseUint(v, 10, 32)
 	if err != nil {
-		return nil, errors.New("invalid record header message size")
+		return msg{}, errors.New("invalid record header message size")
 	}
 
-	return &msg{
+	return msg{
 		offset: off,
 		start:  uint32(pos.headerEnd + 1),
 		num:    uint32(num),
