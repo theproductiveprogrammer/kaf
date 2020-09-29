@@ -739,7 +739,7 @@ func loadMsgOffsets(start int64, msglog *msgLog) error {
 			}
 			msglog.lastmsg = msg.num
 		}
-		if msg.sz != 0 {
+		if msg.sz+msg.start != 0 {
 			offset = msg.offset + int64(msg.start+msg.sz)
 		}
 	}
