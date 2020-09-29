@@ -53,10 +53,10 @@ type logsRoutine struct {
 }
 
 /*    understand/
- * represents a request for a message log from the main logsRoutine
- * goroutine. We can request for the log to be created if it doesn't
- * exist and we expect our response to be sent back via the channel we
- * provide (either the message log itself or an error)
+ * represents a request for a particular log routine from the main
+ * logsRoutine goroutine. We can request for the log to be created if it
+ * doesn't exist and we expect our response to be sent back via the
+ * channel we provide (either the log itself or an error)
  */
 type logReq struct {
 	name   string
@@ -65,22 +65,28 @@ type logReq struct {
 	resp chan logReqResp
 }
 type logReqResp struct {
-	msglog *msgLog
-	err    error
+	logR *logRoutine
+	err  error
+}
+
+/*    understand/
+ * represents a request for all log routines currently being managed.
+ */
+type allLogsReq struct {
+	resp chan []*logRoutine
 }
 
 /*    understand/
  * similar to logsRoutine, each message log is also handled by it's own
  * goroutine. We communicate to it via it's channels - either to get
- * message logs or to put a new message log or get stats.
+ * message logs or to put a new message log or get info.
  */
-type msgLog struct {
-	name  string
-	get   chan getReq
-	put   chan putReq
-	ach   chan archiveReq
-	stat  chan statReq
-	stats stats
+type logRoutine struct {
+	name string
+	get  chan getReq
+	put  chan putReq
+	ach  chan archiveReq
+	stat chan statReq
 }
 
 /*    understand/
@@ -132,6 +138,7 @@ type statReq struct {
  * relevant stats for a message log
  */
 type stats struct {
+	name     string
 	lastmsg  uint32
 	getCount uint32
 	putCount uint32
@@ -184,109 +191,138 @@ func showHelp() {
  * message logs - it creates/manages all of them
  *
  *    way/
- * load all logs from disk, set up the stat tracker,
- * then return the goroutine
+ * start up the goroutine, load all logs from disk, and set up the stat tracker
  */
 func getLogsRoutine(dbloc string) logsRoutine {
-	c := make(chan logReq)
-	logs := []*msgLog{}
 
-	files, err := ioutil.ReadDir(dbloc)
+	c := make(chan logReq)
+	a := make(chan allLogsReq)
+	go logsGo(dbloc, c, a)
+
+	logsR := logsRoutine{c}
+
+	err := loadAllLogs(dbloc, logsR)
 	if err != nil {
 		log.Println(err)
-		log.Panic("Failed to read:", dbloc)
+		log.Panic("Failed loading all logs from", dbloc)
 	}
+
+	go statsGo(logsR, a)
+
+	return logsR
+}
+
+/*    understand/
+ * manages all log routines, handling creating new routines and
+ * returning routines as requested
+ */
+func logsGo(dbloc string, c chan logReq, a chan allLogsReq) {
+	var logRs []*logRoutine
+	for {
+		select {
+		case req := <-c:
+			logR := findLogR(logRs, req.name)
+			if logR != nil {
+				req.resp <- logReqResp{logR, nil}
+				continue
+			}
+
+			loc := path.Join(dbloc, req.name)
+			if req.create || fileExists(loc) {
+
+				createLogFile(loc)
+
+				logR, err := loadLog(req.name, loc)
+				if err != nil {
+					req.resp <- logReqResp{nil, err}
+				} else {
+					logRs = append(logRs, logR)
+					req.resp <- logReqResp{logR, nil}
+				}
+			} else {
+
+				req.resp <- logReqResp{}
+			}
+
+		case req := <-a:
+			req.resp <- logRs
+		}
+	}
+}
+
+/*    way/
+ * load all existing logs from disk
+ */
+func loadAllLogs(dbloc string, logsR logsRoutine) error {
+	files, err := ioutil.ReadDir(dbloc)
+	if err != nil {
+		return err
+	}
+
 	for _, f := range files {
 		if isHidden(f.Name()) {
 			continue
 		}
-		log_, err := loadLog(dbloc, f.Name())
+		_, err := getLog(f.Name(), logsR, true)
 		if err != nil {
-			log.Println(err)
-			log.Panic("Failed to read:", f.Name())
+			return errors.New(fmt.Sprintf("%s: %s", f.Name(), err.Error()))
 		}
-		logs = append(logs, log_)
 	}
 
-	go func() {
-		for {
-			req := <-c
-			msgLog := findLog(logs, req.name)
-			if msgLog != nil {
-				req.resp <- logReqResp{msgLog, nil}
-				continue
-			}
+	return nil
+}
 
-			if req.create || logExists(dbloc, req.name) {
-
-				createLogFile(dbloc, req.name)
-
-				log_, err := loadLog(dbloc, req.name)
-				if err != nil {
-					req.resp <- logReqResp{nil, err}
-					continue
-				}
-				logs = append(logs, log_)
-				req.resp <- logReqResp{log_, nil}
-
-				continue
-			}
-
-			req.resp <- logReqResp{}
-
-		}
-	}()
-
-	logsR := logsRoutine{c}
-
+/*    way/
+ * periodically post statistics of all logs that have activity
+ */
+func statsGo(logsR logsRoutine, a chan allLogsReq) {
 	ticker := time.NewTicker(5 * time.Minute)
+	c := make(chan stats)
+	r := make(chan []*logRoutine)
+	var b strings.Builder
+
 	var statCount uint32 = 0
-	go func() {
-		c := make(chan stats)
-		var b strings.Builder
+	for {
+		start := time.Now()
 
-		for {
-			isEmpty := true
-			start := time.Now()
+		<-ticker.C
+		statCount++
 
-			<-ticker.C
-			statCount++
-
-			for _, log_ := range logs {
-				log_.stat <- statReq{resp: c}
-				log_.stats = <-c
-				if log_.name != "_kaf" && hasStats(log_) {
-					isEmpty = false
-				}
-			}
-
-			end := time.Now()
-
-			if isEmpty {
-				continue
-			}
-
-			msglog, err := getLog("_kaf", logsR, true)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-
-			toJSON(logs, statCount, start, end, &b)
-
-			c := make(chan putReqResp)
-			msglog.put <- putReq{
-				data: []byte(b.String()),
-				resp: c,
-			}
-			resp := <-c
-			if resp.err != nil {
-				log.Println(err)
+		allstats := []stats{}
+		a <- allLogsReq{r}
+		for _, logR := range <-r {
+			logR.stat <- statReq{resp: c}
+			stats := <-c
+			if stats.name != "_kaf" && hasActivity(stats) {
+				allstats = append(allstats, stats)
 			}
 		}
-	}()
 
-	return logsR
+		end := time.Now()
+
+		if len(allstats) == 0 {
+			continue
+		}
+
+		logR, err := getLog("_kaf", logsR, true)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		statsJSON(allstats, statCount, start, end, &b)
+
+		c := make(chan putReqResp)
+		logR.put <- putReq{
+			data: []byte(b.String()),
+			resp: c,
+		}
+		resp := <-c
+		if resp.err != nil {
+			log.Println(err)
+		}
+
+	}
 }
 
 /*    understand/
@@ -306,11 +342,18 @@ func isHidden(name string) bool {
 	return false
 }
 
-func hasStats(log_ *msgLog) bool {
-	return log_.stats.getCount > 0 || log_.stats.putCount > 0
+/*    understand/
+ * we count a log as having activity if it has any get or put requests
+ * or any errors
+ */
+func hasActivity(stats stats) bool {
+	return stats.getCount+stats.putCount > 0 || stats.errCount > 0
 }
 
-func toJSON(logs []*msgLog,
+/*    way/
+ * convert all the stats received to a JSON report
+ */
+func statsJSON(allstats []stats,
 	statCount uint32, start, end time.Time,
 	b *strings.Builder) {
 
@@ -322,29 +365,29 @@ func toJSON(logs []*msgLog,
 	b.WriteString(end.UTC().Format(time.RFC3339))
 	fmt.Fprintf(b, `","statno":%d,"logs":[`, statCount)
 
-	for i, log_ := range logs {
+	for i, stats := range allstats {
 
-		if log_.stats.errCount > 0 {
+		if stats.errCount > 0 {
 			fmt.Fprintf(b,
 				`{"name":"%s","last":%d,"gets":%d,"puts":%d,"errs":%d}`,
-				log_.name,
-				log_.stats.lastmsg,
-				log_.stats.getCount, log_.stats.putCount,
-				log_.stats.errCount)
-		} else if hasStats(log_) {
+				stats.name,
+				stats.lastmsg,
+				stats.getCount, stats.putCount,
+				stats.errCount)
+		} else if hasActivity(stats) {
 			fmt.Fprintf(b,
 				`{"name":"%s","last":%d,"gets":%d,"puts":%d}`,
-				log_.name,
-				log_.stats.lastmsg,
-				log_.stats.getCount, log_.stats.putCount)
+				stats.name,
+				stats.lastmsg,
+				stats.getCount, stats.putCount)
 		} else {
 			fmt.Fprintf(b,
 				`{"name":"%s","last":%d}`,
-				log_.name,
-				log_.stats.lastmsg)
+				stats.name,
+				stats.lastmsg)
 		}
 
-		if i != len(logs)-1 {
+		if i != len(allstats)-1 {
 			b.WriteRune(',')
 		}
 	}
@@ -352,8 +395,7 @@ func toJSON(logs []*msgLog,
 	b.WriteString("]}")
 }
 
-func logExists(dbloc, name string) bool {
-	loc := path.Join(dbloc, name)
+func fileExists(loc string) bool {
 	info, err := os.Stat(loc)
 	if os.IsNotExist(err) {
 		return false
@@ -361,8 +403,8 @@ func logExists(dbloc, name string) bool {
 	return !info.IsDir()
 }
 
-func findLog(logs []*msgLog, name string) *msgLog {
-	for _, l := range logs {
+func findLogR(logRs []*logRoutine, name string) *logRoutine {
+	for _, l := range logRs {
 		if l.name == name {
 			return l
 		}
@@ -373,8 +415,7 @@ func findLog(logs []*msgLog, name string) *msgLog {
 /*    way/
  * create the requested db file with header.
  */
-func createLogFile(dbloc, name string) error {
-	loc := path.Join(dbloc, name)
+func createLogFile(loc string) error {
 	f, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return err
@@ -388,8 +429,7 @@ func createLogFile(dbloc, name string) error {
  * open the given event log file, read existing records, and set up a
  * goroutine to handle get and put requests
  */
-func loadLog(dbloc, name string) (*msgLog, error) {
-	loc := path.Join(dbloc, name)
+func loadLog(name, loc string) (*logRoutine, error) {
 	f, err := os.OpenFile(loc, os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err
@@ -445,7 +485,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 				req.resp <- achReqResp{err}
 			case req := <-s:
 				lastmsg := nextnum - 1
-				req.resp <- stats{lastmsg, getCount, putCount, achCount, errCount}
+				req.resp <- stats{name, lastmsg, getCount, putCount, achCount, errCount}
 				getCount = 0
 				putCount = 0
 				achCount = 0
@@ -454,7 +494,7 @@ func loadLog(dbloc, name string) (*msgLog, error) {
 		}
 	}()
 
-	return &msgLog{
+	return &logRoutine{
 		name: name,
 		get:  g,
 		put:  p,
@@ -748,7 +788,7 @@ func requestHandlers(cfg *config, lr logsRoutine) *http.ServeMux {
 /*    way/
  * helper function that requests logsRoutine for the given log
  */
-func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
+func getLog(name string, logsR logsRoutine, create bool) (*logRoutine, error) {
 	c := make(chan logReqResp)
 	logsR.c <- logReq{
 		name:   name,
@@ -756,7 +796,7 @@ func getLog(name string, logsR logsRoutine, create bool) (*msgLog, error) {
 		resp:   c,
 	}
 	resp := <-c
-	return resp.msglog, resp.err
+	return resp.logR, resp.err
 }
 
 /*    way/
