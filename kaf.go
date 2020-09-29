@@ -135,18 +135,6 @@ type statReq struct {
 }
 
 /*    understand/
- * relevant stats for a message log
- */
-type stats struct {
-	name     string
-	lastmsg  uint32
-	getCount uint32
-	putCount uint32
-	achCount uint32
-	errCount uint32
-}
-
-/*    understand/
  * represents a message in the event log
  */
 type msg struct {
@@ -166,10 +154,33 @@ type msgOff struct {
 	offset int64
 }
 
+/*    understand/
+ * important info on the message log
+ */
+type msgLog struct {
+	name    string
+	loc     string
+	f       *os.File
+	size    int64
+	lastmsg uint32
+	msgOs   []msgOff
+
+	getCount uint32
+	putCount uint32
+	achCount uint32
+	errCount uint32
+}
+
+/*    understand/
+ * relevant stats for a message log are available in the msgLog
+ * structure
+ */
+type stats msgLog
+
 /*
  * Data File constants
  */
-const DBHeader = "KAF_DB|v1|1"
+const DBHeader = "KAF_DB|v1|"
 const RecHeaderPfx = "\nKAF_MSG|"
 const RecHeaderSfx = "\n"
 const RespHeaderPfx = "KAF_MSGS|v1"
@@ -237,11 +248,14 @@ func logsGo(dbloc string, c chan logReq, a chan allLogsReq) {
 			}
 
 			loc := path.Join(dbloc, req.name)
-			if req.create || fileExists(loc) {
 
-				createLogFile(loc)
+			if req.create && !fileExists(loc) {
+				createLogFile(loc, 0)
+			}
 
-				logR, err := loadLog(req.name, loc)
+			if fileExists(loc) {
+
+				logR, err := loadLogR(req.name, loc)
 				if err != nil {
 					req.resp <- logReqResp{nil, err}
 				} else {
@@ -424,40 +438,30 @@ func findLogR(logRs []*logRoutine, name string) *logRoutine {
 /*    way/
  * create the requested db file with header.
  */
-func createLogFile(loc string) error {
+func createLogFile(loc string, lastmsg uint32) error {
 	f, err := os.OpenFile(loc, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	no := strconv.FormatUint(uint64(lastmsg), 10)
 	f.Write([]byte(DBHeader))
+	f.Write([]byte(no))
 	return nil
 }
 
 /*    way/
- * open the given event log file, read existing records, and set up a
- * goroutine to handle get and put requests
+ * load records from the log file and, and set up a goroutine to handle requests
  */
-func loadLog(name, loc string) (*logRoutine, error) {
-	f, err := os.OpenFile(loc, os.O_RDWR, 0644)
+func loadLogR(name, loc string) (*logRoutine, error) {
+	msglog := &msgLog{
+		name: name,
+		loc:  loc,
+	}
+	err := loadLogFile(msglog)
 	if err != nil {
 		return nil, err
 	}
-	msgOs, err := loadMsgOffsets(f)
-	if err != nil {
-		return nil, err
-	}
-	nextnum := uint32(1)
-	for _, mo := range msgOs {
-		if mo.num >= nextnum {
-			nextnum = mo.num + 1
-		}
-	}
-
-	var getCount uint32 = 0
-	var putCount uint32 = 0
-	var achCount uint32 = 0
-	var errCount uint32 = 0
 
 	g := make(chan getReq)
 	p := make(chan putReq)
@@ -467,38 +471,19 @@ func loadLog(name, loc string) (*logRoutine, error) {
 		for {
 			select {
 			case req := <-g:
-				getCount++
-				msgs, err := get_(req.num, msgOs, f)
-				if err != nil {
-					errCount++
-				}
-				req.resp <- getReqResp{msgs, err}
+				req.resp <- get_(req.num, msglog)
 			case req := <-p:
-				putCount++
-				mo, err := put_(req.data, nextnum, f)
-				if err != nil {
-					errCount++
-					req.resp <- putReqResp{err: err}
-				} else {
-					msgOs = append(msgOs, mo)
-					nextnum = mo.num + 1
-					req.resp <- putReqResp{num: mo.num}
-				}
+				req.resp <- put_(req.data, msglog)
 			case req := <-a:
-				achCount++
-				var err error
-				msgOs, f, err = archive_(loc, req.upto, msgOs, f)
-				if err != nil {
-					errCount++
-				}
-				req.resp <- achReqResp{err}
+				req.resp <- archive_(req.upto, msglog)
 			case req := <-s:
-				lastmsg := nextnum - 1
-				req.resp <- stats{name, lastmsg, getCount, putCount, achCount, errCount}
-				getCount = 0
-				putCount = 0
-				achCount = 0
-				errCount = 0
+				stats := stats(*msglog)
+				msglog.getCount = 0
+				msglog.putCount = 0
+				msglog.achCount = 0
+				msglog.errCount = 0
+
+				req.resp <- stats
 			}
 		}
 	}()
@@ -517,41 +502,78 @@ func loadLog(name, loc string) (*logRoutine, error) {
  * file to read any pending messages. Create a new log file and copy
  * across any pending messages
  */
-func archive_(dbloc string, upto uint32, msgOs []msgOff, f *os.File) ([]msgOff, *os.File, error) {
-	f.Close()
+func archive_(upto uint32, msglog *msgLog) achReqResp {
+	msglog.achCount++
+
+	clearMsgLog(msglog)
 	t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
-	name := filepath.Base(dbloc)
-	achname := fmt.Sprintf("--%s--%s", name, t)
-	achloc := filepath.Join(filepath.Dir(dbloc), achname)
-	if err := os.Rename(dbloc, achloc); err != nil {
-		return nil, nil, err
+	achname := fmt.Sprintf("--%s--%s", msglog.name, t)
+	achloc := filepath.Join(filepath.Dir(msglog.loc), achname)
+	if err := os.Rename(msglog.loc, achloc); err != nil {
+		msglog.errCount++
+		return achReqResp{err}
 	}
-	return nil, nil, nil
+	return achReqResp{}
 }
 
-/*    way/
+/*    problem/
  * return a few messages (max 5 || size < 256) to the user
+ *    way/
+ * find the index of the first message >= the number and then walk the
+ * next few messages, stopping when too big or out of bounds
  */
-func get_(num uint32, msgOs []msgOff, f *os.File) ([]*msg, error) {
+func get_(num uint32, msglog *msgLog) getReqResp {
+	msglog.getCount++
+
+	ndx := findMsgNdx(msglog.msgOs, num)
+
 	var msgs []*msg
-	var tot uint32 = 0
-	for i := 0; i < 5; i++ {
-		ndx := num + uint32(i-1)
-		if ndx < uint32(len(msgOs)) {
-			mo := msgOs[ndx]
-			msg, err := readMsg(mo, f)
-			if err != nil {
-				return nil, err
-			}
-			msgs = append(msgs, msg)
-			tot += msg.sz
-			if tot >= 256 {
-				break
-			}
+	var i, tot, l uint32
+	l = uint32(len(msglog.msgOs))
+	for ; i < 5 && ndx+i < l; i++ {
+		mo := msglog.msgOs[ndx+i]
+		msg, err := readMsg(mo, msglog.f)
+		if err != nil {
+			msglog.errCount++
+			return getReqResp{nil, err}
+		}
+		msgs = append(msgs, msg)
+		tot += msg.sz
+		if tot >= 256 {
+			break
 		}
 	}
 
-	return msgs, nil
+	return getReqResp{msgs, nil}
+}
+
+/*    way/
+ * binary search for first index that matches the number passed in
+ */
+func findMsgNdx(a []msgOff, num uint32) uint32 {
+	if len(a) == 0 {
+		return 0
+	}
+	s := uint32(0)
+	e := uint32(len(a) - 1)
+	for s <= e {
+		if num <= a[s].num {
+			return s
+		}
+		if a[e].num < num {
+			break
+		}
+		m := (s + e) / 2
+		if m == s {
+			return e
+		}
+		if a[m].num < num {
+			s = m
+		} else {
+			e = m
+		}
+	}
+	return uint32(len(a))
 }
 
 /*    way/
@@ -588,66 +610,143 @@ func readMsg(mo msgOff, f *os.File) (*msg, error) {
  * read in the message then append it to the end of the file with the
  * correct record header (KAF|num|sz)
  */
-func put_(data []byte, num uint32, f *os.File) (msgOff, error) {
-	inf, err := f.Stat()
+func put_(data []byte, msglog *msgLog) putReqResp {
+	msglog.putCount++
+
+	inf, err := msglog.f.Stat()
 	if err != nil {
-		return msgOff{}, err
+		msglog.errCount++
+		return putReqResp{0, err}
+	}
+	if msglog.size != inf.Size() {
+		loadLogFile(msglog)
 	}
 	off := inf.Size()
+	num := msglog.lastmsg + 1
 
-	sz := uint32(len(data))
-	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, sz, RecHeaderSfx)
+	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, msglog.size, RecHeaderSfx)
 	hdr_ := []byte(hdr)
-	if _, err := f.WriteAt(hdr_, off); err != nil {
-		return msgOff{}, err
+	if _, err := msglog.f.WriteAt(hdr_, off); err != nil {
+		msglog.errCount++
+		return putReqResp{0, err}
 	}
 	start := uint32(len(hdr_))
 
-	if _, err := f.WriteAt(data, off+int64(start)); err != nil {
-		return msgOff{}, err
+	if _, err := msglog.f.WriteAt(data, off+int64(start)); err != nil {
+		msglog.errCount++
+		return putReqResp{0, err}
 	}
 
-	return msgOff{
-		num:    num,
-		offset: off,
-	}, nil
+	return putReqResp{num, nil}
+}
 
+/*    outcome/
+ * clear any existing data, (re)-open the log file, read in the header
+ * and message offsets and repopulate the msglog
+ */
+func loadLogFile(msglog *msgLog) error {
+	clearMsgLog(msglog)
+
+	f, err := os.OpenFile(msglog.loc, os.O_RDWR, 0644)
+	if err != nil {
+		return err
+	}
+	inf, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	msglog.f = f
+	msglog.size = inf.Size()
+
+	hdrEnd, err := loadDBHeader(msglog)
+	if err != nil {
+		return err
+	}
+
+	if err := loadMsgOffsets(hdrEnd, msglog); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func clearMsgLog(msglog *msgLog) {
+	if msglog.f != nil {
+		msglog.f.Close()
+	}
+	msglog.f = nil
+	msglog.size = 0
+	msglog.lastmsg = 0
+	msglog.msgOs = nil
+}
+
+/*    outcome/
+ * validate the first part of the header (fixed part), then read in the
+ * lastmsg number
+ */
+func loadDBHeader(msglog *msgLog) (int64, error) {
+	const BIGENOUGH = 32
+	hdr := make([]byte, BIGENOUGH)
+
+	n, err := msglog.f.ReadAt(hdr, 0)
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+
+	l := len(DBHeader)
+
+	if bytes.Compare([]byte(DBHeader), hdr[:l]) != 0 {
+		return 0, errors.New("invalid db header")
+	}
+
+	e := l
+	for e < n {
+		e++
+		if e == n || hdr[e] == '\n' {
+			break
+		}
+	}
+
+	lastmsg, err := strconv.ParseUint(string(hdr[l:e]), 10, 32)
+	if err != nil {
+		m := fmt.Sprintf("bad last message number: %s", hdr[l:e])
+		return 0, errors.New(m)
+	}
+
+	msglog.lastmsg = uint32(lastmsg)
+
+	return int64(e), nil
 }
 
 /*    way/
  * Step through the file, loading message offsets
  */
-func loadMsgOffsets(f *os.File) ([]msgOff, error) {
-	dbhdr := []byte(DBHeader)
-	hdr := make([]byte, len(dbhdr))
-	if _, err := io.ReadFull(f, hdr); err != nil {
-		return nil, err
-	}
-	if bytes.Compare(dbhdr, hdr) != 0 {
-		return nil, errors.New("invalid db header")
-	}
+func loadMsgOffsets(start int64, msglog *msgLog) error {
+	offset := start
 
 	var msgOs []msgOff
-	inf, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	sz := inf.Size()
-	offset := int64(len(DBHeader))
-	for offset < sz {
-		msg, err := readRecInfo(offset, f)
+	for offset < msglog.size {
+		msg, err := readRecInfo(offset, msglog.f)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if msg.num > 0 {
 			msgOs = append(msgOs, msgOff{msg.num, msg.offset})
+			if msg.num <= msglog.lastmsg {
+				m := fmt.Sprintf("message number did not increase (%d !< %d)", msglog.lastmsg, msg.num)
+				return errors.New(m)
+			}
+			msglog.lastmsg = msg.num
 		}
 		if msg.sz != 0 {
 			offset = msg.offset + int64(msg.start+msg.sz)
 		}
 	}
 
-	return msgOs, nil
+	msglog.msgOs = msgOs
+
+	return nil
 }
 
 /*    way/
