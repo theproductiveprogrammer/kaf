@@ -498,22 +498,83 @@ func loadLogR(name, loc string) (*logRoutine, error) {
 }
 
 /*    way/
- * close the file handle, rename the existing file, then reopen the new
- * file to read any pending messages. Create a new log file and copy
- * across any pending messages
+ * keep track of the message offset from which we want to copy,
+ * close/clean the existing message log, rename the existing file,
+ * create a new log file, copy any existing messages and reload it.
  */
 func archive_(upto uint32, msglog *msgLog) achReqResp {
 	msglog.achCount++
 
+	if len(msglog.msgOs) == 0 {
+		return achReqResp{errors.New("empty logfile: nothing toarchive")}
+	}
+	if upto == 0 {
+		return achReqResp{errors.New("message to archive upto not given")}
+	}
+
+	ndx := findMsgNdx(msglog.msgOs, upto)
+	if ndx >= uint32(len(msglog.msgOs)) {
+		upto = msglog.lastmsg
+	}
+
+	var firstMsg msgOff
+	if ndx < uint32(len(msglog.msgOs)) {
+		firstMsg = msglog.msgOs[ndx]
+		if firstMsg.num == upto {
+			firstMsg.num = 0
+			firstMsg.offset = 0
+			ndx++
+		}
+		if ndx < uint32(len(msglog.msgOs)) {
+			firstMsg = msglog.msgOs[ndx]
+		}
+	}
+
 	clearMsgLog(msglog)
+
 	t := time.Now().UTC().Format("2006-01-02T15_04_05Z07_00")
-	achname := fmt.Sprintf("--%s--%s", msglog.name, t)
-	achloc := filepath.Join(filepath.Dir(msglog.loc), achname)
-	if err := os.Rename(msglog.loc, achloc); err != nil {
+	aname := fmt.Sprintf("--%s--%s", msglog.name, t)
+	aloc := filepath.Join(filepath.Dir(msglog.loc), aname)
+	if err := os.Rename(msglog.loc, aloc); err != nil {
 		msglog.errCount++
 		return achReqResp{err}
 	}
-	return achReqResp{}
+
+	createLogFile(msglog.loc, upto)
+	src, err := os.OpenFile(aloc, os.O_RDWR, 0644)
+	if err != nil {
+		return achReqResp{err}
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(msglog.loc, os.O_RDWR, 0644)
+	if err != nil {
+		return achReqResp{err}
+	}
+	defer dst.Close()
+
+	if firstMsg.offset > 0 {
+		if _, err := src.Seek(firstMsg.offset, 0); err != nil {
+			return achReqResp{err}
+		}
+		if _, err := dst.Seek(0, 2); err != nil {
+			return achReqResp{err}
+		}
+		buf := make([]byte, 4096)
+		for {
+			n, err := src.Read(buf)
+			if err != nil && err != io.EOF {
+				return achReqResp{err}
+			}
+			if n == 0 {
+				break
+			}
+			if _, err := dst.Write(buf[:n]); err != nil {
+				return achReqResp{err}
+			}
+		}
+	}
+
+	return achReqResp{loadLogFile(msglog)}
 }
 
 /*    problem/
