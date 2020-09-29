@@ -822,16 +822,16 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		return
 	}
 
-	msglog, err := getLog(name, logsR, false)
+	logR, err := getLog(name, logsR, false)
 	if err != nil {
 		err_(err.Error(), 500, r, w)
 		return
 	}
 
 	var msgs []*msg
-	if msglog != nil {
+	if logR != nil {
 		c := make(chan getReqResp)
-		msglog.get <- getReq{
+		logR.get <- getReq{
 			num:  uint32(num),
 			resp: c,
 		}
@@ -882,7 +882,7 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		err_("put: invalid log name", 400, r, w)
 		return
 	}
-	msglog, err := getLog(name, logsR, true)
+	logR, err := getLog(name, logsR, true)
 	if err != nil {
 		err_(err.Error(), 500, r, w)
 		return
@@ -918,7 +918,7 @@ func put(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 	}
 
 	c := make(chan putReqResp)
-	msglog.put <- putReq{
+	logR.put <- putReq{
 		data: data,
 		resp: c,
 	}
@@ -953,14 +953,14 @@ func archive(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWri
 		return
 	}
 
-	msglog, err := getLog(name, logsR, false)
-	if err != nil || msglog == nil {
+	logR, err := getLog(name, logsR, false)
+	if err != nil || logR == nil {
 		err_("archive: Invalid log", 400, r, w)
 		return
 	}
 
 	c := make(chan achReqResp)
-	msglog.ach <- archiveReq{
+	logR.ach <- archiveReq{
 		upto: uint32(num),
 		resp: c,
 	}
