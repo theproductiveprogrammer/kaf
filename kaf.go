@@ -624,7 +624,7 @@ func put_(data []byte, msglog *msgLog) putReqResp {
 	off := inf.Size()
 	num := msglog.lastmsg + 1
 
-	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, msglog.size, RecHeaderSfx)
+	hdr := fmt.Sprintf("%s%d|%d%s", RecHeaderPfx, num, len(data), RecHeaderSfx)
 	hdr_ := []byte(hdr)
 	if _, err := msglog.f.WriteAt(hdr_, off); err != nil {
 		msglog.errCount++
