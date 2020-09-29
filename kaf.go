@@ -523,20 +523,20 @@ func archive_(dbloc string, upto uint32, msgs []*msg, f *os.File) ([]*msg, *os.F
 /*    way/
  * return a few messages (max 5 || size < 256) to the user
  */
-func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
-	var msgs_ []*msg
+func get_(num uint32, memmsgs []*msg, f *os.File) ([]*msg, error) {
+	var msgs []*msg
 	var tot uint32 = 0
 	for i := 0; i < 5; i++ {
 		ndx := num + uint32(i-1)
-		if ndx < uint32(len(msgs)) {
-			m := msgs[ndx]
-			if m != nil {
-				msg_, err := readMsg(*m, f)
+		if ndx < uint32(len(memmsgs)) {
+			memmsg := memmsgs[ndx]
+			if memmsg != nil {
+				msg, err := readMsg(memmsg, f)
 				if err != nil {
 					return nil, err
 				}
-				msgs_ = append(msgs_, msg_)
-				tot += m.sz
+				msgs = append(msgs, msg)
+				tot += msg.sz
 			}
 			if tot >= 256 {
 				break
@@ -544,36 +544,36 @@ func get_(num uint32, msgs []*msg, f *os.File) ([]*msg, error) {
 		}
 	}
 
-	return msgs_, nil
+	return msgs, nil
 }
 
 /*    way/
  * validate that message header is correct then,
  * read message data from disk
  */
-func readMsg(msg__ msg, f *os.File) (*msg, error) {
+func readMsg(memmsg *msg, f *os.File) (*msg, error) {
 
-	msg_, err := readRecInfo(msg__.offset, f)
+	msg, err := readRecInfo(memmsg.offset, f)
 	if err != nil {
 		return nil, err
 	}
 
-	if msg_ == nil {
+	if msg == nil {
 		return nil, errors.New("Message missing")
 	}
 
-	if msg__.num != msg_.num {
+	if memmsg.num != msg.num {
 		return nil, errors.New("Message number on disk incorrect")
 	}
 
-	data := make([]byte, msg_.sz)
-	_, err = f.ReadAt(data, msg_.offset+int64(msg_.start))
+	data := make([]byte, msg.sz)
+	_, err = f.ReadAt(data, msg.offset+int64(msg.start))
 	if err != nil {
 		return nil, err
 	}
-	msg_.data = data
+	msg.data = data
 
-	return msg_, nil
+	return msg, nil
 }
 
 /*    way/
