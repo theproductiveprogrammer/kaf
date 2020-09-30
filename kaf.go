@@ -1017,7 +1017,7 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 
 	if len(msgs) > 0 {
 		lastmsg := msgs[len(msgs)-1].num
-		w.Header().Add("X-Kaf-LastMsg", strconv.FormatUint(uint64(lastmsg), 10))
+		w.Header().Add("X-Kaf-LastMsgSent", strconv.FormatUint(uint64(lastmsg), 10))
 	}
 
 	format := "kaf"
