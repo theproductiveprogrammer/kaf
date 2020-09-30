@@ -1015,19 +1015,19 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		msgs = resp.msgs
 	}
 
-  format := "kaf"
-  qv = r.URL.Query()["format"]
-  if len(qv) > 0 {
-    format = qv[0]
-  }
-  switch(format) {
-  case "raw":
-    rawFormat(msgs, r, w)
-  case "json":
-    jsonFormat(msgs, r, w)
-  default:
-    kafFormat(msgs, r, w)
-  }
+	format := "kaf"
+	qv = r.URL.Query()["format"]
+	if len(qv) > 0 {
+		format = qv[0]
+	}
+	switch format {
+	case "raw":
+		rawFormat(msgs, r, w)
+	case "json":
+		jsonFormat(msgs, r, w)
+	default:
+		kafFormat(msgs, r, w)
+	}
 }
 
 /*    way/
@@ -1073,7 +1073,7 @@ func rawFormat(msgs []*msg, r *http.Request, w http.ResponseWriter) {
 	respSz := 0
 	for _, m := range msgs {
 		respSz += len(m.data)
-    respSz += len("\n")
+		respSz += len("\n")
 	}
 
 	w.Header().Add("Content-Type", "application/octet-stream")
@@ -1100,34 +1100,34 @@ func jsonFormat(msgs []*msg, r *http.Request, w http.ResponseWriter) {
 
 	respSz := len("[]")
 	for i, m := range msgs {
-    if i != 0  {
-      respSz += len(",\n")
-    }
+		if i != 0 {
+			respSz += len(",\n")
+		}
 		respSz += len(m.data)
 	}
 
 	w.Header().Add("Content-Type", "application/json")
 	w.Header().Add("Content-Length", strconv.FormatUint(uint64(respSz), 10))
 
-  goterr := false
-  wr := func(d []byte) {
-    if goterr {
-      return
-    }
-    if _, err := w.Write(d); err != nil {
-      goterr = true
-      err_("get: failed sending data back", 500, r, w)
-    }
-  }
-
-  wr([]byte("["))
-	for i, m := range msgs {
-    if i != 0 {
-      wr([]byte(",\n"))
-    }
-    wr(m.data)
+	goterr := false
+	wr := func(d []byte) {
+		if goterr {
+			return
+		}
+		if _, err := w.Write(d); err != nil {
+			goterr = true
+			err_("get: failed sending data back", 500, r, w)
+		}
 	}
-  wr([]byte("]"))
+
+	wr([]byte("["))
+	for i, m := range msgs {
+		if i != 0 {
+			wr([]byte(",\n"))
+		}
+		wr(m.data)
+	}
+	wr([]byte("]"))
 }
 
 /*    way/
