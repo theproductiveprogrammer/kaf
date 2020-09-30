@@ -25,14 +25,11 @@ Writing a client for **Kaf** is pretty simple in whatever language you like. Her
 ```python
 import sys, time, requests
 
-kafsvr = "http://localhost:7749"
-logfile = "mylog"
-
-FROM = 1
+FROM = 1 # start from very first message
 while True:
-    r = requests.get(f'{kafsvr}/get/{logfile}?from={FROM}&format=raw')
+    r = requests.get(f'http://localhost:7749/get/mylog?from={FROM}&format=raw')
     latest = r.headers.get('x-kaf-lastmsgsent')
-    if latest:
+    if latest:  # got new messages
         print(r.text, flush=True)
         FROM = int(latest) + 1
     time.sleep(2)
