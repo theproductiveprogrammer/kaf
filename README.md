@@ -6,7 +6,7 @@ A Small, High Performance, Event Store (cf. [Apache Kafka](https://kafka.apache.
 
 When Kakfa is overkill for a your Event Store. 
 
-The data format is human-friendly — simple enough to `tail`/`cat`/read with any editor — which helps greatly with understanding your system and quick debugging.
+The data format is human-friendly — simple enough to `tail`/`cat`/read with any editor — which helps a lot with understanding your system and quick debugging.
 
 ## How?
 
