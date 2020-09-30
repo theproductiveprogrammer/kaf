@@ -1015,6 +1015,11 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		msgs = resp.msgs
 	}
 
+	if len(msgs) > 0 {
+		lastmsg := msgs[len(msgs)-1].num
+		w.Header().Add("X-Kaf-LastMsg", strconv.FormatUint(uint64(lastmsg), 10))
+	}
+
 	format := "kaf"
 	qv = r.URL.Query()["format"]
 	if len(qv) > 0 {
