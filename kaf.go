@@ -973,9 +973,8 @@ func getLog(name string, logsR logsRoutine, create bool) (*logRoutine, error) {
 }
 
 /*    way/
- * handle /get/<logname>?from=num request, responding with messages from
- * the event log and correctly setting Content-Length and Content-Type
- * for efficiency
+ * handle /get/<logname>?from=num&format=[kaf|raw|json] request, responding
+ * with messages from the event log
  */
 func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter) {
 	name := strings.TrimSpace(r.URL.Path[len("/get/"):])
@@ -1016,6 +1015,26 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 		msgs = resp.msgs
 	}
 
+  format := "kaf"
+  qv = r.URL.Query()["format"]
+  if len(qv) > 0 {
+    format = qv[0]
+  }
+  switch(format) {
+  case "raw":
+    rawFormat(msgs, r, w)
+  case "json":
+    jsonFormat(msgs, r, w)
+  default:
+    kafFormat(msgs, r, w)
+  }
+}
+
+/*    way/
+ * respond in kaf format - with headers and data - setting the content
+ * type and content length for efficiency.
+ */
+func kafFormat(msgs []*msg, r *http.Request, w http.ResponseWriter) {
 	respHdr := fmt.Sprintf("%s|%d", RespHeaderPfx, len(msgs))
 	respSz := len(respHdr)
 	msgHdrs := make([][]byte, len(msgs))
@@ -1043,6 +1062,72 @@ func get(cfg *config, r *http.Request, logsR logsRoutine, w http.ResponseWriter)
 			return
 		}
 	}
+}
+
+/*    way/
+ * respond in raw format - just data without headers - setting the content
+ * type and content length for efficiency.
+ */
+func rawFormat(msgs []*msg, r *http.Request, w http.ResponseWriter) {
+
+	respSz := 0
+	for _, m := range msgs {
+		respSz += len(m.data)
+    respSz += len("\n")
+	}
+
+	w.Header().Add("Content-Type", "application/octet-stream")
+	w.Header().Add("Content-Length", strconv.FormatUint(uint64(respSz), 10))
+
+	for _, m := range msgs {
+		if _, err := w.Write(m.data); err != nil {
+			err_("get: failed sending data back", 500, r, w)
+			return
+		}
+		if _, err := w.Write([]byte("\n")); err != nil {
+			err_("get: failed sending data back", 500, r, w)
+			return
+		}
+	}
+}
+
+/*    way/
+ * respond in json format - making the assumption that all stored data
+ * is json we wrap it in a JSON array and set the content
+ * type (and content length for efficiency).
+ */
+func jsonFormat(msgs []*msg, r *http.Request, w http.ResponseWriter) {
+
+	respSz := len("[]")
+	for i, m := range msgs {
+    if i != 0  {
+      respSz += len(",\n")
+    }
+		respSz += len(m.data)
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.Header().Add("Content-Length", strconv.FormatUint(uint64(respSz), 10))
+
+  goterr := false
+  wr := func(d []byte) {
+    if goterr {
+      return
+    }
+    if _, err := w.Write(d); err != nil {
+      goterr = true
+      err_("get: failed sending data back", 500, r, w)
+    }
+  }
+
+  wr([]byte("["))
+	for i, m := range msgs {
+    if i != 0 {
+      wr([]byte(",\n"))
+    }
+    wr(m.data)
+	}
+  wr([]byte("]"))
 }
 
 /*    way/
