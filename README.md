@@ -25,13 +25,14 @@ Writing a client for **Kaf** is pretty simple in whatever language you like. Her
 ```python
 import sys, time, requests
 
-FROM = 1 # start from very first message
+# let's start from the first message
+FROM = 1
 while True:
     r = requests.get(f'http://localhost:7749/get/mylog?from={FROM}&format=raw')
     latest = r.headers.get('x-kaf-lastmsgsent')
     if latest:  # got new messages
-        print(r.text, flush=True)
-        FROM = int(latest) + 1
+        print(r.text, flush=True) # show
+        FROM = int(latest) + 1    # get next
     time.sleep(1)
 ```
 
@@ -68,7 +69,9 @@ Test4
 
 ### Try JSON
 
-You can archive the current log and post JSON data instead:
+Instead of unstructured data like “Test1/Test2” let's put in JSON instead.
+
+First we archive the current log, then post some JSON records:
 
 ```sh
 $> curl localhost:7749/archive/mylog?upto=100
@@ -77,13 +80,13 @@ $> curl localhost:7749/put/mylog -d '{"id":1,"data":"First Record"}'
 $> curl localhost:7749/put/mylog -d '{"id":1,"data":"Second Record"}'
 ```
 
-You can try piping this through [jq](https://stedolan.github.io/jq/):
+Now try piping the output we get through [jq](https://stedolan.github.io/jq/):
 
 ```sh
 $> python kafclient.py | jq
 ```
 
-And get a pretty JSON output!
+As we post JSON data, we will see a pretty JSON output!
 
 ## Saving Messages to Logfile
 
