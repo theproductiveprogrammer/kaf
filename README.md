@@ -88,7 +88,9 @@ $> python kafclient.py | jq
 
 As we post JSON data, we will see a pretty JSON output!
 
-## Saving Messages to Logfile
+## Core API
+
+### Saving Messages to a Logfile
 
 Save data using HTTP POST:
 
@@ -100,7 +102,7 @@ POSTED Message Data
 
 *Example:* `curl localhost:7749 /put/testlog -d @notes`
 
-## Getting Messages from Logfile
+### Getting Messages from the Logfile
 
 Get messages using HTTP GET:
 
