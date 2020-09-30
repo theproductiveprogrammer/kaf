@@ -32,7 +32,7 @@ while True:
     if latest:  # got new messages
         print(r.text, flush=True)
         FROM = int(latest) + 1
-    time.sleep(2)
+    time.sleep(1)
 ```
 
 To try it out save the python program as `kafclient.py` and put data in your **Kaf** log:
