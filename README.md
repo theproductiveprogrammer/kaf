@@ -126,4 +126,74 @@ Request archival of the log using: (HTTP POST)
 
 Once archived **Kaf** releases any file handles to the log file and you can move it out of the directory or delete it or back it up as you wish.
 
+## Client
+
+Writing a client for **Kaf** is pretty simple in whatever language you like. Here is a sample client that polls for latest messages in your log in [python](https://python.org):
+
+```python
+import sys, time, requests
+
+kafsvr = "http://localhost:7749"
+logfile = "mylog"
+
+FROM = 1
+while True:
+    r = requests.get(f'{kafsvr}/get/{logfile}?from={FROM}&format=raw')
+    latest = r.headers.get('x-kaf-lastmsgsent')
+    if latest:
+        print(r.text, flush=True)
+        FROM = int(latest) + 1
+    time.sleep(2)
+```
+
+To try it out save the python program as `kafclient.py` and put data in your **Kaf** log:
+
+```sh
+$> curl localhost:7749/put/mylog -d Test1
+$> curl localhost:7749/put/mylog -d Test2
+```
+
+Then run the python client:
+
+```sh
+$> python3 kafclient.py
+Test1
+Test2
+```
+
+As you add more records:
+
+```sh
+$> curl localhost:7749/put/mylog -d Test3
+$> curl localhost:7749/put/mylog -d Test4
+```
+
+The client will react and print out the new records:
+
+```sh
+$> python3 kafclient.py
+...
+Test3
+Test4
+```
+
+### Using JSON
+
+You can archive the current log and post JSON data instead:
+
+```sh
+$> curl localhost:7749/archive/mylog?upto=100
+
+$> curl localhost:7749/put/mylog -d '{"id":1,"data":"First Record"}'
+$> curl localhost:7749/put/mylog -d '{"id":1,"data":"Second Record"}'
+```
+
+You can try piping this through [jq](https://stedolan.github.io/jq/):
+
+```sh
+$> python kafclient.py | jq
+```
+
+And get a pretty JSON output!
+
 ---
