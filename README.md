@@ -32,6 +32,28 @@ Get messages using: (HTTP GET)
 /get/logfile?from=<msg number>
 ```
 
+Example: `curl localhost:7749 /get/testlog?from=1&format=raw`
+
+Responds with:
+
+```
+Message Data
+Message Data
+```
+
+Or, if you know you have JSON stored: `curl localhost:7749 /get/testlog?from=1&format=json`
+
+Responds with:
+
+```
+[{"id":1,"data":"First Record"},
+{"id":2,"data":"Second Record"},
+...
+]
+```
+
+If you want the most generic response, simply ask for `kaf` format (or don’t specify the `format` parameter)
+
 Example: `curl localhost:7749 /get/testlog?from=1`
 
 Responds with:
@@ -58,7 +80,7 @@ Message Data
 ...
 ```
 
-Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) /[`tail`](https://en.wikipedia.org/wiki/Tail_(Unix)) / [edit](https://www.vim.org) and examine.
+Disk format is easy to [`cat`](https://en.wikipedia.org/wiki/Cat_(Unix)) /[`tail`](https://en.wikipedia.org/wiki/Tail_(Unix)) / [edit](https://www.vim.org) and examine. You can even open it in your editor and update/fix it easily!
 
 ## Transparency
 
