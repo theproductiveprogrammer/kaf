@@ -704,6 +704,7 @@ func put_(data []byte, msglog *msgLog) putReqResp {
 	}
 
 	msglog.msgOs = append(msglog.msgOs, msgOff{num, off})
+	msglog.lastmsg = num
 
 	return putReqResp{num, nil}
 }
