@@ -19,7 +19,7 @@ import (
 /*    understand/
  * program version
  */
-const VERSION = "1.5.2"
+const VERSION = "1.5.3"
 
 /*    understand/
  * main entry point into our program
@@ -578,10 +578,13 @@ func archive_(upto uint32, msglog *msgLog) achReqResp {
 }
 
 /*    problem/
- * return a few messages (max 5 || size < 256) to the user
+ * return a few messages (max 5 || size < 3200) to the user
  *    way/
  * find the index of the first message >= the number and then walk the
  * next few messages, stopping when too big or out of bounds
+ * NB: Why 3200? We want sizes to be small enough so they fit the
+ * initial congestion window of TCP - we could probably go (much?) higher
+ * but we don't expect large data records anyway so 3200 is reasonable.
  */
 func get_(num uint32, msglog *msgLog) getReqResp {
 	msglog.getCount++
@@ -600,7 +603,7 @@ func get_(num uint32, msglog *msgLog) getReqResp {
 		}
 		msgs = append(msgs, msg)
 		tot += msg.sz
-		if tot >= 256 {
+		if tot >= 3200 {
 			break
 		}
 	}
